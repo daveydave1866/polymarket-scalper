@@ -22,13 +22,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm install --frozen-lockfile=false && pnpm --filter @workspace/db push && npx concurrently \"pnpm --filter @workspace/api-server dev\" \"pnpm --filter @workspace/trading-bot dev\""
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm install --frozen-lockfile=false && pnpm --filter @workspace/db build && pnpm --filter @workspace/api-zod build && pnpm --filter @workspace/db push && npx concurrently \"pnpm --filter @workspace/api-server dev\" \"pnpm --filter @workspace/trading-bot dev\""
+waitForPort = 5000
 
 [[ports]]
 localPort = 3001
@@ -38,6 +38,6 @@ externalPort = 3001
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 5001
-externalPort = 3000
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
