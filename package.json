@@ -1,0 +1,14 @@
+{
+  "name": "polymarket-scraper",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @workspace/api-server dev\" \"pnpm --filter @workspace/trading-bot dev\"",
+    "build": "pnpm --filter @workspace/api-server build && pnpm --filter @workspace/trading-bot build",
+    "db:push": "pnpm --filter @workspace/db push"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
