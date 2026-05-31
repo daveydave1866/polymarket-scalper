@@ -1,0 +1,1 @@
+- [Railway deployment quirks](railway-deployment.md) — nixpacks pnpm PATH issue; lib packages need compiled dist; snapshot caching forces service recreate to bust

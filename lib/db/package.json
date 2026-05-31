@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "scripts": {
+    "build": "tsc",
     "push": "drizzle-kit push"
   },
   "dependencies": {
@@ -15,6 +19,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.1",
-    "@types/node": "^22.15.3"
+    "@types/node": "^22.15.3",
+    "typescript": "^5.7.3"
   }
 }

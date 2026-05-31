@@ -250,7 +250,7 @@ router.put("/bot/config", async (req, res): Promise<void> => {
     const [updated] = await db
       .update(botConfigTable)
       .set({
-        ...(safeRest as Parameters<typeof db.update>[0] extends infer T ? T : never),
+        ...(safeRest as unknown as Partial<typeof botConfigTable.$inferInsert>),
         enabledCategories: enabledCategories ? enabledCategories.join(",") : undefined,
       })
       .where(eq(botConfigTable.id, "singleton"))
@@ -324,8 +324,9 @@ router.post("/bot/generate-l2-keys", async (req, res): Promise<void> => {
     if (!pk.startsWith("0x")) pk = `0x${pk}`;
     const { ClobClient } = await import("@polymarket/clob-client");
     const wallet = new ethers.Wallet(pk);
-    const client = new ClobClient("https://clob.polymarket.com", 137, wallet as unknown as Parameters<typeof ClobClient>[2]);
-    const creds = await client.createOrDeriveApiCreds();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new ClobClient("https://clob.polymarket.com", 137, wallet as any);
+    const creds = await client.createOrDeriveApiKey();
     logger.info({ address: wallet.address }, "L2 API credentials generated");
     res.json({
       ok: true,
