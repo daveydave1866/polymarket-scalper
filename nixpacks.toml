@@ -1,0 +1,17 @@
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = [
+  "npm install -g pnpm@10",
+  "pnpm install --frozen-lockfile=false"
+]
+
+[phases.build]
+cmds = [
+  "pnpm --filter @workspace/trading-bot build",
+  "pnpm --filter @workspace/api-server build"
+]
+
+[start]
+cmd = "pnpm --filter @workspace/db push && NODE_ENV=production node artifacts/api-server/dist/index.js"
