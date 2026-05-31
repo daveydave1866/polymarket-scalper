@@ -1,0 +1,53 @@
+1 of 3 services with issues
+•
+1 recent failure
+Marketscalper1866
+1
+Offline
+Your Marketscalper1866 service is still offline with a failed deployment from about 2 hours ago. Let me check the build logs to see what went wrong.
+
+Searched build logs: @level:error
+
+Hide result
+21:48:46
+[ 9/10] RUN pnpm --filter @workspace/trading-bot run build
+21:48:46
+Build Failed: build daemon returned an error < failed to solve: process "/bin/sh -c pnpm --filter @workspace/trading-bot run build" did not complete successfully: exit code: 1 >
+The build is failing at the pnpm build step for the trading-bot workspace. The error doesn't show the root cause. Let me get more context from the full build logs.
+
+Searched build logs
+
+Hide result
+21:48:29
+[ 3/10] RUN npm install -g pnpm@9
+21:48:29
+[ 4/10] COPY pnpm-lock.yaml pnpm-workspace.yaml .npmrc package.json tsconfig.base.json tsconfig.json ./
+21:48:30
+[ 4/10] COPY pnpm-lock.yaml pnpm-workspace.yaml .npmrc package.json tsconfig.base.json tsconfig.json ./
+21:48:30
+[ 5/10] COPY lib/ ./lib/
+21:48:30
+[ 5/10] COPY lib/ ./lib/
+21:48:30
+[ 6/10] COPY artifacts/api-server/ ./artifacts/api-server/
+21:48:30
+[ 6/10] COPY artifacts/api-server/ ./artifacts/api-server/
+21:48:30
+[ 7/10] COPY artifacts/trading-bot/ ./artifacts/trading-bot/
+21:48:30
+[ 7/10] COPY artifacts/trading-bot/ ./artifacts/trading-bot/
+21:48:30
+[ 8/10] RUN pnpm install --frozen-lockfile
+...and 36 more logs
+No, it's not fixed. The build is failing because:
+
+"customFetch" is not exported by "../../lib/api-client-react/src/index.ts"
+
+In src/pages/positions.tsx line 14, you're importing customFetch from @workspace/api-client-react, but that export doesn't exist in the api-client-react package's index file.
+
+You need to either:
+
+Export customFetch from lib/api-client-react/src/index.ts if it exists elsewhere in that package
+Remove the import and use a different approach if customFetch isn't needed
+Import from the correct location if customFetch is defined in a different file
+Do you want me to create a PR to fix this, or do you know what the correct fix should be?
