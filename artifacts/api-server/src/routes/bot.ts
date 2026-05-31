@@ -14,6 +14,8 @@ import {
 import { logger } from "../lib/logger.js";
 import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop } from "../lib/engine.js";
 import { sendDailyReport } from "../lib/telegram.js";
+import { getCredentialsStatus } from "../lib/credentials.js";
+import { GetCredentialsStatusResponse } from "@workspace/api-zod";
 import { ethers } from "ethers";
 
 const router: IRouter = Router();
@@ -287,6 +289,16 @@ router.put("/bot/config", async (req, res): Promise<void> => {
     );
   } catch (err) {
     logger.error({ err }, "PUT /bot/config failed");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/bot/credentials-status", async (_req, res): Promise<void> => {
+  try {
+    const status = await getCredentialsStatus();
+    res.json(GetCredentialsStatusResponse.parse(status));
+  } catch (err) {
+    logger.error({ err }, "GET /bot/credentials-status failed");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -87,3 +87,18 @@ export const GetOpportunitiesResponse = z.object({
   totalTracked: z.number(),
 });
 export type GetOpportunitiesResponseType = z.infer<typeof GetOpportunitiesResponse>;
+
+// ── Credentials status ────────────────────────────────────────────────────────
+
+const CredentialGroupSchema = z.object({
+  configured: z.boolean(),
+  source: z.enum(["env", "db", "none"]),
+});
+
+export const GetCredentialsStatusResponse = z.object({
+  polymarket: CredentialGroupSchema,
+  telegram: CredentialGroupSchema,
+  sportsApi: CredentialGroupSchema,
+  weatherApi: CredentialGroupSchema,
+});
+export type GetCredentialsStatusResponseType = z.infer<typeof GetCredentialsStatusResponse>;

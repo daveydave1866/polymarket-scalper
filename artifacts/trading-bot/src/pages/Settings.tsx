@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
   useGetBotConfig, useUpdateBotConfig, getGetBotConfigQueryKey,
+  useGetCredentialsStatus,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -475,6 +476,65 @@ function TelegramSetup({ hasBotToken, hasChatId, control, form }: {
   );
 }
 
+type CredSource = "env" | "db" | "none";
+function SourceBadge({ source }: { source: CredSource }) {
+  const styles: Record<CredSource, string> = {
+    env: "border-sky-400/30 text-sky-400 bg-sky-400/5",
+    db:  "border-primary/30 text-primary bg-primary/5",
+    none: "border-border/40 text-muted-foreground/40 bg-transparent",
+  };
+  const labels: Record<CredSource, string> = { env: "ENV", db: "DB", none: "—" };
+  return (
+    <span className={`font-mono text-[8px] border px-1.5 py-0.5 uppercase tracking-widest ${styles[source]}`}>
+      {labels[source]}
+    </span>
+  );
+}
+
+function CredentialsStatusPanel() {
+  const { data, isLoading } = useGetCredentialsStatus();
+
+  const groups = [
+    { key: "polymarket" as const, label: "Polymarket" },
+    { key: "telegram"   as const, label: "Telegram"   },
+    { key: "sportsApi"  as const, label: "Sports API"  },
+    { key: "weatherApi" as const, label: "Weather API" },
+  ];
+
+  return (
+    <div className="border border-border bg-card overflow-hidden">
+      <div className="px-5 py-3 border-b border-border/40 flex items-center justify-between">
+        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+          Credential Status
+        </span>
+        {isLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground/40" />}
+      </div>
+      <div className="px-5 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {groups.map(({ key, label }) => {
+          const group = data?.[key];
+          const configured = group?.configured ?? false;
+          const source = (group?.source ?? "none") as CredSource;
+          return (
+            <div key={key} className="space-y-1.5">
+              <div className="font-mono text-[9px] text-muted-foreground/50 uppercase tracking-widest">{label}</div>
+              <div className="flex items-center gap-1.5">
+                {configured
+                  ? <CheckCircle2 className="w-3 h-3 text-primary flex-shrink-0" />
+                  : <Circle className="w-3 h-3 text-muted-foreground/30 flex-shrink-0" />
+                }
+                <span className={`font-mono text-[10px] ${configured ? "text-primary" : "text-muted-foreground/40"}`}>
+                  {configured ? "Set" : "Not set"}
+                </span>
+                {!isLoading && <SourceBadge source={source} />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -568,6 +628,8 @@ export default function Settings() {
           Bot configuration and API credentials
         </p>
       </div>
+
+      <CredentialsStatusPanel />
 
       {watchedMode === "live" && (
         <div className={cn(

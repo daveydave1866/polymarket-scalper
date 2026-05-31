@@ -1,6 +1,7 @@
 import { db, botConfigTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
+import type { GetCredentialsStatusResponseType } from "@workspace/api-zod";
 
 type DbConfig = typeof botConfigTable.$inferSelect;
 
@@ -56,6 +57,58 @@ export async function resolvePolymarketCredentials(): Promise<PolymarketCredenti
 
   logger.debug("Polymarket credentials resolved from DB config (with optional env override)");
   return { privateKey, apiKey, apiSecret, apiPassphrase };
+}
+
+export async function getCredentialsStatus(): Promise<GetCredentialsStatusResponseType> {
+  const config = await getConfig();
+
+  // ── Polymarket ──────────────────────────────────────────────────────────────
+  const pmEnv = !!(
+    process.env.POLYMARKET_PRIVATE_KEY &&
+    process.env.POLYMARKET_API_KEY &&
+    process.env.POLYMARKET_API_SECRET &&
+    process.env.POLYMARKET_API_PASSPHRASE
+  );
+  const pmDb = !!(
+    config?.polymarketPrivateKey &&
+    config?.polymarketApiKey &&
+    config?.polymarketApiSecret &&
+    config?.polymarketApiPassphrase
+  );
+  const polymarket = pmEnv
+    ? { configured: true, source: "env" as const }
+    : pmDb
+    ? { configured: true, source: "db" as const }
+    : { configured: false, source: "none" as const };
+
+  // ── Telegram ────────────────────────────────────────────────────────────────
+  const tgEnv = !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+  const tgDb = !!(config?.telegramBotToken && config?.telegramChatId);
+  const telegram = tgEnv
+    ? { configured: true, source: "env" as const }
+    : tgDb
+    ? { configured: true, source: "db" as const }
+    : { configured: false, source: "none" as const };
+
+  // ── Sports API ──────────────────────────────────────────────────────────────
+  const saEnv = !!process.env.SPORTS_API_KEY;
+  const saDb = !!config?.sportsApiKey;
+  const sportsApi = saEnv
+    ? { configured: true, source: "env" as const }
+    : saDb
+    ? { configured: true, source: "db" as const }
+    : { configured: false, source: "none" as const };
+
+  // ── Weather API ─────────────────────────────────────────────────────────────
+  const waEnv = !!process.env.WEATHER_API_KEY;
+  const waDb = !!config?.weatherApiKey;
+  const weatherApi = waEnv
+    ? { configured: true, source: "env" as const }
+    : waDb
+    ? { configured: true, source: "db" as const }
+    : { configured: false, source: "none" as const };
+
+  return { polymarket, telegram, sportsApi, weatherApi };
 }
 
 export async function resolveTelegramCredentials(): Promise<TelegramCredentials | null> {

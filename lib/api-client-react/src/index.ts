@@ -8,6 +8,7 @@ import type {
   UpdateBotConfigResponseType,
   SyncMarketsResponseType,
   GetOpportunitiesResponseType,
+  GetCredentialsStatusResponseType,
 } from "@workspace/api-zod";
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
@@ -77,6 +78,10 @@ export function getGetOpportunitiesQueryKey() {
   return ["bot", "opportunities"] as const;
 }
 
+export function getGetCredentialsStatusQueryKey() {
+  return ["bot", "credentials-status"] as const;
+}
+
 // ── Queries ───────────────────────────────────────────────────────────────────
 
 export function useGetBotStatus(options?: { query?: { enabled?: boolean; refetchInterval?: number } }) {
@@ -101,6 +106,14 @@ export function useGetOpportunities(options?: { query?: { refetchInterval?: numb
     queryKey: getGetOpportunitiesQueryKey(),
     queryFn: () => apiFetch<GetOpportunitiesResponseType>("/bot/opportunities"),
     refetchInterval: options?.query?.refetchInterval ?? 30000,
+    enabled: options?.query?.enabled ?? true,
+  });
+}
+
+export function useGetCredentialsStatus(options?: { query?: { enabled?: boolean } }) {
+  return useQuery<GetCredentialsStatusResponseType>({
+    queryKey: getGetCredentialsStatusQueryKey(),
+    queryFn: () => apiFetch<GetCredentialsStatusResponseType>("/bot/credentials-status"),
     enabled: options?.query?.enabled ?? true,
   });
 }
