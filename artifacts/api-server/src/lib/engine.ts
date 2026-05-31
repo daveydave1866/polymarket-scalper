@@ -4,7 +4,7 @@ import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
 import { resolvePolymarketCredentials } from "./credentials.js";
 import { ethers } from "ethers";
-import { notifyTrade } from "./telegram.js";
+import { notifyTrade, notifySignal, notifyError, sendDailyReport } from "./telegram.js";
 
 export { resolvePolymarketCredentials };
 
@@ -171,14 +171,16 @@ async function generateSignals() {
       const edge = priceSkew * 2;
 
       if (edge >= config.minEdge) {
+        const confidence = Math.min(priceSkew * 4, 1);
         await db.insert(signalsTable).values({
           id: randomUUID(),
           marketId: market.id,
           side,
-          confidence: Math.min(priceSkew * 4, 1),
+          confidence,
           edge,
           source: "price_skew",
         });
+        await notifySignal(market.question, side, edge, confidence).catch(() => {});
       }
     }
   }
@@ -195,15 +197,23 @@ async function buildClobClient(): Promise<any | null> {
   const creds = await resolvePolymarketCredentials();
   if (!creds) {
     logger.warn("No Polymarket credentials available");
+    await notifyError("API auth failure: Polymarket credentials are missing or incomplete. Live trading is paused.").catch(() => {});
     return null;
   }
-  const { ClobClient } = await import("@polymarket/clob-client");
-  let pk = creds.privateKey.trim();
-  if (!pk.startsWith("0x")) pk = `0x${pk}`;
-  const wallet = new ethers.Wallet(pk);
-  const l2Creds = { key: creds.apiKey, secret: creds.apiSecret, passphrase: creds.apiPassphrase };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new ClobClient(CLOB_HOST, CHAIN_ID, wallet as any, l2Creds as any);
+  try {
+    const { ClobClient } = await import("@polymarket/clob-client");
+    let pk = creds.privateKey.trim();
+    if (!pk.startsWith("0x")) pk = `0x${pk}`;
+    const wallet = new ethers.Wallet(pk);
+    const l2Creds = { key: creds.apiKey, secret: creds.apiSecret, passphrase: creds.apiPassphrase };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new ClobClient(CLOB_HOST, CHAIN_ID, wallet as any, l2Creds as any);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err }, "Failed to build CLOB client");
+    await notifyError("API auth failure: Could not initialise Polymarket CLOB client.", message).catch(() => {});
+    return null;
+  }
 }
 
 function resolveTokenId(market: MarketForOrdering, side: string): string | undefined {
@@ -252,7 +262,14 @@ async function placeLiveOrder(
     logger.info({ conditionId: market.conditionId, side, clobSide, price, size, orderId }, "Live order submitted");
     return orderId;
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logger.error({ err, conditionId: market.conditionId }, "Failed to place live order");
+    const isAuthError = /401|403|unauthorized|forbidden|invalid.*key|authentication/i.test(message);
+    if (isAuthError) {
+      await notifyError("API auth failure: Live order rejected — check your Polymarket API credentials.", message).catch(() => {});
+    } else {
+      await notifyError(`Live order failed (${clobSide} ${side})`, message).catch(() => {});
+    }
     return null;
   }
 }
@@ -296,6 +313,11 @@ async function activatePendingPositions(): Promise<void> {
             .set({ status: "open", entryPrice: fillPrice, currentPrice: fillPrice, size: filledSize, pnl: 0 })
             .where(eq(positionsTable.id, pos.id));
           logger.info({ positionId: pos.id, fillPrice, filledSize }, "Live position activated on entry fill");
+
+          const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
+          if (mkt) {
+            await notifyTrade("opened", mkt.question, pos.side, filledSize, fillPrice).catch(() => {});
+          }
         } else if (cancelled) {
           await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
           logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
@@ -314,6 +336,11 @@ async function activatePendingPositions(): Promise<void> {
             .set({ status: "closed", closedAt: new Date(), closedPrice: fillPrice, pnl })
             .where(eq(positionsTable.id, pos.id));
           logger.info({ positionId: pos.id, fillPrice, pnl }, "Live position confirmed closed on sell fill");
+
+          const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
+          if (mkt) {
+            await notifyTrade("closed", mkt.question, pos.side, pos.size, fillPrice, pnl).catch(() => {});
+          }
         } else if (cancelled) {
           logger.warn({ positionId: pos.id, closeOrderId: pos.closeOrderId }, "Close order cancelled — resetting to open for re-close attempt next cycle");
           await db
@@ -323,7 +350,12 @@ async function activatePendingPositions(): Promise<void> {
         }
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       logger.error({ err, positionId: pos.id }, "Failed to check in-flight order status");
+      const isAuthError = /401|403|unauthorized|forbidden|invalid.*key|authentication/i.test(message);
+      if (isAuthError) {
+        await notifyError("API auth failure: Could not check live order status — verify Polymarket credentials.", message).catch(() => {});
+      }
     }
   }
 }
@@ -560,15 +592,39 @@ export async function monitorPositions(): Promise<void> {
 let tradingLoopTimer: ReturnType<typeof setInterval> | null = null;
 const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
 
+let lastDailyReportDate: string | null = null;
+
+async function maybeSendDailyReport(): Promise<void> {
+  try {
+    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+    if (!config) return;
+
+    const reportHour = config.dailyReportHour ?? 8;
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    const todayKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}`;
+
+    if (currentHour === reportHour && lastDailyReportDate !== todayKey) {
+      await sendDailyReport();
+      lastDailyReportDate = todayKey;
+    }
+  } catch (err) {
+    logger.error({ err }, "Failed to send scheduled daily report");
+  }
+}
+
 async function runTradingCycle(): Promise<void> {
   try {
     logger.info("Trading cycle start");
     await runDiscovery();
     await executeTrades();
     await monitorPositions();
+    await maybeSendDailyReport();
     logger.info("Trading cycle complete");
   } catch (err) {
     logger.error({ err }, "Unhandled error in trading cycle");
+    const message = err instanceof Error ? err.message : String(err);
+    await notifyError("Unhandled error in trading cycle", message).catch(() => {});
   }
 }
 

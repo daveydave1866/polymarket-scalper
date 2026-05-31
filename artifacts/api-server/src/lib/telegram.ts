@@ -74,3 +74,42 @@ export async function notifyTrade(
     logger.error({ err }, "Failed to send trade notification");
   }
 }
+
+export async function notifySignal(
+  market: string,
+  side: string,
+  edge: number,
+  confidence: number
+) {
+  const creds = await resolveTelegramCredentials();
+  if (!creds) return;
+
+  const msg = [
+    `📡 *Signal Fired*`,
+    `Market: ${market}`,
+    `Side: \`${side.toUpperCase()}\`  |  Edge: \`${(edge * 100).toFixed(1)}%\`  |  Confidence: \`${(confidence * 100).toFixed(0)}%\``,
+  ].join("\n");
+
+  try {
+    await sendMessage(creds.botToken, creds.chatId, msg);
+  } catch (err) {
+    logger.error({ err }, "Failed to send signal notification");
+  }
+}
+
+export async function notifyError(message: string, detail?: string) {
+  const creds = await resolveTelegramCredentials();
+  if (!creds) return;
+
+  const msg = [
+    `🚨 *Bot Error*`,
+    message,
+    ...(detail ? [`\`\`\`\n${detail.slice(0, 500)}\n\`\`\``] : []),
+  ].join("\n");
+
+  try {
+    await sendMessage(creds.botToken, creds.chatId, msg);
+  } catch (err) {
+    logger.error({ err }, "Failed to send error notification");
+  }
+}

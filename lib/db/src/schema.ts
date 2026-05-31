@@ -17,6 +17,7 @@ export const botConfigTable = pgTable("bot_config", {
   polymarketApiPassphrase: text("polymarket_api_passphrase"),
   telegramBotToken: text("telegram_bot_token"),
   telegramChatId: text("telegram_chat_id"),
+  dailyReportHour: integer("daily_report_hour").default(8),
   sportsApiKey: text("sports_api_key"),
   weatherApiKey: text("weather_api_key"),
 });

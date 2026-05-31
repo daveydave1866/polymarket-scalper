@@ -217,6 +217,7 @@ router.get("/bot/config", async (_req, res): Promise<void> => {
         polymarketApiPassphrase: config.polymarketApiPassphrase ? "••••••••" : undefined,
         telegramBotToken: config.telegramBotToken ? "••••••••" : undefined,
         telegramChatId: config.telegramChatId ?? undefined,
+        dailyReportHour: config.dailyReportHour ?? 8,
         sportsApiKey: config.sportsApiKey ? "••••••••" : undefined,
         weatherApiKey: config.weatherApiKey ? "••••••••" : undefined,
       })
@@ -279,6 +280,7 @@ router.put("/bot/config", async (req, res): Promise<void> => {
         polymarketApiPassphrase: updated.polymarketApiPassphrase ? "••••••••" : undefined,
         telegramBotToken: updated.telegramBotToken ? "••••••••" : undefined,
         telegramChatId: updated.telegramChatId ?? undefined,
+        dailyReportHour: updated.dailyReportHour ?? 8,
         sportsApiKey: updated.sportsApiKey ? "••••••••" : undefined,
         weatherApiKey: updated.weatherApiKey ? "••••••••" : undefined,
       })

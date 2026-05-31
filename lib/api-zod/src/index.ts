@@ -41,6 +41,7 @@ export const BotConfigSchema = z.object({
   polymarketApiPassphrase: z.string().optional(),
   telegramBotToken: z.string().optional(),
   telegramChatId: z.string().optional(),
+  dailyReportHour: z.number().int().min(0).max(23).optional(),
   sportsApiKey: z.string().optional(),
   weatherApiKey: z.string().optional(),
 });

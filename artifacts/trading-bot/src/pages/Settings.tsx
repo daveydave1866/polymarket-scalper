@@ -35,6 +35,7 @@ const configSchema = z.object({
   polymarketApiPassphrase: z.string().optional(),
   telegramBotToken: z.string().optional(),
   telegramChatId: z.string().optional(),
+  dailyReportHour: z.coerce.number().int().min(0).max(23).optional(),
   sportsApiKey: z.string().optional(),
   weatherApiKey: z.string().optional(),
 });
@@ -349,7 +350,7 @@ function L2KeyGenerator({ isSet, onSave }: { isSet: boolean; onSave: (key: strin
 }
 
 function TelegramSetup({ hasBotToken, hasChatId, control, form }: {
-  hasBotToken: boolean; hasChatId: boolean; control: unknown; form: unknown;
+  hasBotToken: boolean; hasChatId: boolean; control: unknown; form: ReturnType<typeof useForm<ConfigForm>>;
 }) {
   const [showToken, setShowToken] = useState(false);
   const steps = [
@@ -427,12 +428,43 @@ function TelegramSetup({ hasBotToken, hasChatId, control, form }: {
           </FormItem>
         )} />
       </div>
+      <div className="space-y-3 p-4 border border-primary/15 bg-primary/3">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-bold text-foreground/90">Daily Report Time (UTC)</span>
+        </div>
+        <FormField control={form.control} name="dailyReportHour" defaultValue={8} render={({ field }) => (
+          <FormItem>
+            <FormLabel className="font-mono text-[10px] uppercase tracking-widest">
+              Send daily P&amp;L summary at hour (UTC 0–23)
+            </FormLabel>
+            <FormControl>
+              <Input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
+                placeholder="8"
+                name={field.name}
+                ref={field.ref}
+                onBlur={field.onBlur}
+                value={typeof field.value === "number" ? field.value : 8}
+                onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                className="font-mono text-xs rounded-none bg-background border-border h-9 focus:border-sky-400/50 w-24"
+              />
+            </FormControl>
+            <FormDescription className="font-mono text-[9px] text-muted-foreground/50">
+              Default: 8 = 08:00 UTC. Bot must be running for the report to send.
+            </FormDescription>
+            <FormMessage className="font-mono text-[10px]" />
+          </FormItem>
+        )} />
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {[
-          { icon: "📈", label: "Daily P&L at 08:00 UTC" },
+          { icon: "📡", label: "Signal fired alerts" },
           { icon: "⚡", label: "Trade execution alerts" },
-          { icon: "🛑", label: "Bot start / stop events" },
-          { icon: "🚨", label: "Error & risk warnings" },
+          { icon: "📈", label: "Configurable daily P&L" },
+          { icon: "🚨", label: "Error & crash warnings" },
         ].map(({ icon, label }) => (
           <div key={label} className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground/60 border border-border/40 bg-muted/5 px-3 py-2">
             <span>{icon}</span> {label}
@@ -453,7 +485,7 @@ export default function Settings() {
     resolver: zodResolver(configSchema),
     defaultValues: {
       mode: "paper", minEdge: 0.05, maxPositionSize: 100,
-      maxOpenPositions: 5, signalWindowSeconds: 300,
+      maxOpenPositions: 5, signalWindowSeconds: 300, dailyReportHour: 8,
     },
   });
 
@@ -474,6 +506,7 @@ export default function Settings() {
         polymarketPrivateKey: "", polymarketApiKey: "", polymarketApiSecret: "",
         polymarketApiPassphrase: "", telegramBotToken: "",
         telegramChatId: config.telegramChatId ?? "",
+        dailyReportHour: config.dailyReportHour ?? 8,
         sportsApiKey: "", weatherApiKey: "",
       });
     }
