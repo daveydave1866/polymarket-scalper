@@ -31,6 +31,18 @@ async function apiFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function customFetch<T = unknown>(
+  path: string,
+  init?: RequestInit
+): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers as Record<string, string>) },
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 async function apiPost<T>(path: string, body?: object): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: "POST",
