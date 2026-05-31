@@ -12,7 +12,7 @@ import {
   GetOpportunitiesResponse,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
-import { runDiscovery, lastDiscoveryAt } from "../lib/engine.js";
+import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop } from "../lib/engine.js";
 import { sendDailyReport } from "../lib/telegram.js";
 import { ethers } from "ethers";
 
@@ -82,6 +82,7 @@ router.post("/bot/start", async (_req, res): Promise<void> => {
       .set({ running: true, startedAt: now.toISOString() })
       .where(eq(botConfigTable.id, "singleton"));
 
+    startTradingLoop();
     logger.info("Bot started");
 
     const config = await getOrCreateConfig();
@@ -112,6 +113,7 @@ router.post("/bot/stop", async (_req, res): Promise<void> => {
       .set({ running: false, startedAt: null })
       .where(eq(botConfigTable.id, "singleton"));
 
+    stopTradingLoop();
     logger.info("Bot stopped");
 
     const signals = await db.select().from(signalsTable);

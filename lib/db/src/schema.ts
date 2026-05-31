@@ -32,6 +32,8 @@ export const marketsTable = pgTable("markets", {
   endDate: text("end_date"),
   conditionId: text("condition_id"),
   slug: text("slug"),
+  outcomes: text("outcomes"),
+  clobTokenIds: text("clob_token_ids"),
   isTracked: boolean("is_tracked").notNull().default(true),
   lastSyncAt: timestamp("last_sync_at").defaultNow(),
 });
@@ -49,6 +51,10 @@ export const signalsTable = pgTable("signals", {
 export const positionsTable = pgTable("positions", {
   id: text("id").primaryKey(),
   marketId: text("market_id").notNull(),
+  signalId: text("signal_id"),
+  orderId: text("order_id"),
+  closeOrderId: text("close_order_id"),
+  closedPrice: real("closed_price"),
   side: text("side").notNull(),
   size: real("size").notNull().default(0),
   entryPrice: real("entry_price").notNull().default(0),

@@ -5,6 +5,9 @@ import { fileURLToPath } from "url";
 import { logger } from "./lib/logger.js";
 import botRouter from "./routes/bot.js";
 import dataRouter from "./routes/data.js";
+import { db, botConfigTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { startTradingLoop } from "./lib/engine.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -28,6 +31,38 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
   logger.info({ port: PORT }, "API server listening");
+
+  try {
+    let [config] = await db
+      .select()
+      .from(botConfigTable)
+      .where(eq(botConfigTable.id, "singleton"));
+
+    if (!config) {
+      [config] = await db
+        .insert(botConfigTable)
+        .values({
+          id: "singleton",
+          mode: "paper",
+          minEdge: 0.05,
+          maxPositionSize: 50,
+          maxOpenPositions: 5,
+          signalWindowSeconds: 300,
+          enabledCategories: "sports,crypto,weather",
+          running: false,
+          paperBalance: 1000,
+        })
+        .returning();
+      logger.info("Bot config initialized with defaults");
+    }
+
+    if (config?.running) {
+      logger.info("Bot was running before restart — resuming trading loop");
+      startTradingLoop();
+    }
+  } catch (err) {
+    logger.warn({ err }, "Could not initialize bot config on startup");
+  }
 });

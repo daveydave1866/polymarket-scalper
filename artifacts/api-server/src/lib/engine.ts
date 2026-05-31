@@ -1,14 +1,22 @@
-import { db, marketsTable, signalsTable, botConfigTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, marketsTable, signalsTable, botConfigTable, positionsTable } from "@workspace/db";
+import { eq, gte, desc, and, inArray, notInArray } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
 import { resolvePolymarketCredentials } from "./credentials.js";
+import { ethers } from "ethers";
+import { notifyTrade } from "./telegram.js";
 
 export { resolvePolymarketCredentials };
 
 export let lastDiscoveryAt: Date | null = null;
 
 const POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com";
+const CLOB_HOST = "https://clob.polymarket.com";
+const CHAIN_ID = 137;
+
+const TAKE_PROFIT_RATIO = 0.08;
+const STOP_LOSS_RATIO = 0.12;
+const MAX_POSITION_AGE_MS = 24 * 60 * 60 * 1000;
 
 interface GammaMarket {
   id: string;
@@ -18,6 +26,9 @@ interface GammaMarket {
   conditionId?: string;
   endDate?: string;
   tokens?: Array<{ outcome: string; price: string }>;
+  outcomes?: string;
+  outcomePrices?: string;
+  clobTokenIds?: string;
   volume?: string;
   liquidity?: string;
   active?: boolean;
@@ -66,10 +77,42 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
 
   for (const m of markets.slice(0, 30)) {
     try {
-      const yesToken = m.tokens?.find((t) => t.outcome.toLowerCase() === "yes");
-      const noToken  = m.tokens?.find((t) => t.outcome.toLowerCase() === "no");
-      const yesPrice = yesToken ? parseFloat(yesToken.price) : 0.5;
-      const noPrice  = noToken  ? parseFloat(noToken.price)  : 1 - yesPrice;
+      let yesPrice = 0.5;
+      let noPrice  = 0.5;
+
+      if (m.outcomePrices && m.outcomes) {
+        try {
+          const prices   = JSON.parse(m.outcomePrices) as string[];
+          const outcomes = JSON.parse(m.outcomes) as string[];
+          const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === "yes");
+          const noIdx  = outcomes.findIndex((o) => o.toLowerCase() === "no");
+
+          if (yesIdx !== -1 && prices[yesIdx] !== undefined) {
+            yesPrice = parseFloat(prices[yesIdx]);
+          } else if (prices[0] !== undefined) {
+            yesPrice = parseFloat(prices[0]);
+          }
+
+          if (noIdx !== -1 && prices[noIdx] !== undefined) {
+            noPrice = parseFloat(prices[noIdx]);
+          } else if (prices[1] !== undefined) {
+            noPrice = parseFloat(prices[1]);
+          } else {
+            noPrice = 1 - yesPrice;
+          }
+        } catch {
+          // keep defaults
+        }
+      } else if (m.tokens && m.tokens.length > 0) {
+        const yesToken = m.tokens.find((t) => t.outcome.toLowerCase() === "yes");
+        const noToken  = m.tokens.find((t) => t.outcome.toLowerCase() === "no");
+        if (yesToken) yesPrice = parseFloat(yesToken.price);
+        if (noToken)  noPrice  = parseFloat(noToken.price);
+        else          noPrice  = 1 - yesPrice;
+      }
+
+      if (isNaN(yesPrice)) yesPrice = 0.5;
+      if (isNaN(noPrice))  noPrice  = 1 - yesPrice;
 
       await db
         .insert(marketsTable)
@@ -77,22 +120,26 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
           id: m.id ?? randomUUID(),
           question: m.question,
           category: categorize(m.question),
-          yesPrice: isNaN(yesPrice) ? 0.5 : yesPrice,
-          noPrice:  isNaN(noPrice)  ? 0.5 : noPrice,
+          yesPrice,
+          noPrice,
           volume:    parseFloat(m.volume    ?? "0") || 0,
           liquidity: parseFloat(m.liquidity ?? "0") || 0,
           endDate:   m.endDate   ?? null,
           conditionId: m.conditionId ?? null,
           slug: m.slug ?? null,
+          outcomes: m.outcomes ?? null,
+          clobTokenIds: m.clobTokenIds ?? null,
           isTracked: true,
         })
         .onConflictDoUpdate({
           target: marketsTable.id,
           set: {
-            yesPrice: isNaN(yesPrice) ? 0.5 : yesPrice,
-            noPrice:  isNaN(noPrice)  ? 0.5 : noPrice,
+            yesPrice,
+            noPrice,
             volume:    parseFloat(m.volume    ?? "0") || 0,
             liquidity: parseFloat(m.liquidity ?? "0") || 0,
+            outcomes: m.outcomes ?? null,
+            clobTokenIds: m.clobTokenIds ?? null,
             lastSyncAt: new Date(),
           },
         });
@@ -106,7 +153,6 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
   lastDiscoveryAt = new Date();
   logger.info({ synced, total: markets.length }, "Market discovery complete");
 
-  // Generate signals for tracked markets
   await generateSignals();
 
   return { synced, total: markets.length, lastSyncAt: lastDiscoveryAt.toISOString() };
@@ -136,4 +182,411 @@ async function generateSignals() {
       }
     }
   }
+}
+
+type MarketForOrdering = {
+  conditionId: string | null;
+  clobTokenIds: string | null;
+  outcomes: string | null;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function buildClobClient(): Promise<any | null> {
+  const creds = await resolvePolymarketCredentials();
+  if (!creds) {
+    logger.warn("No Polymarket credentials available");
+    return null;
+  }
+  const { ClobClient } = await import("@polymarket/clob-client");
+  let pk = creds.privateKey.trim();
+  if (!pk.startsWith("0x")) pk = `0x${pk}`;
+  const wallet = new ethers.Wallet(pk);
+  const l2Creds = { key: creds.apiKey, secret: creds.apiSecret, passphrase: creds.apiPassphrase };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new ClobClient(CLOB_HOST, CHAIN_ID, wallet as any, l2Creds as any);
+}
+
+function resolveTokenId(market: MarketForOrdering, side: string): string | undefined {
+  if (market.clobTokenIds) {
+    try {
+      const tokenIds = JSON.parse(market.clobTokenIds) as string[];
+      const outcomes = market.outcomes ? (JSON.parse(market.outcomes) as string[]) : [];
+      const sideIdx = outcomes.findIndex((o) => o.toLowerCase() === side.toLowerCase());
+      if (sideIdx !== -1 && tokenIds[sideIdx]) return tokenIds[sideIdx];
+      return side === "yes" ? tokenIds[0] : tokenIds[1];
+    } catch {
+      // fall through
+    }
+  }
+  return undefined;
+}
+
+async function placeLiveOrder(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any,
+  market: MarketForOrdering,
+  side: string,
+  clobSide: "BUY" | "SELL",
+  price: number,
+  size: number,
+): Promise<string | null> {
+  try {
+    let tokenId = resolveTokenId(market, side);
+
+    if (!tokenId && market.conditionId) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clobMarket: any = await client.getMarket(market.conditionId);
+      const tokens: Array<{ outcome: string; token_id: string }> = clobMarket?.tokens ?? [];
+      const token = tokens.find((t) => t.outcome.toLowerCase() === side.toLowerCase());
+      tokenId = token?.token_id;
+    }
+
+    if (!tokenId) {
+      logger.warn({ conditionId: market.conditionId, side }, "Token ID not found");
+      return null;
+    }
+
+    const order = await client.createLimitOrder({ tokenID: tokenId, price, size, side: clobSide });
+    const response = await client.postOrder(order, "GTC");
+    const orderId: string = response?.orderID ?? response?.order_id ?? response?.id ?? randomUUID();
+    logger.info({ conditionId: market.conditionId, side, clobSide, price, size, orderId }, "Live order submitted");
+    return orderId;
+  } catch (err) {
+    logger.error({ err, conditionId: market.conditionId }, "Failed to place live order");
+    return null;
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseOrderFill(order: any, fallbackPrice: number, fallbackSize: number) {
+  const status: string = order?.status ?? order?.orderStatus ?? "";
+  const sizeMatched = parseFloat(order?.size_matched ?? order?.sizeMatched ?? "0");
+  const orderPrice  = parseFloat(order?.price ?? order?.originalPrice ?? String(fallbackPrice));
+  const fillPrice   = isNaN(orderPrice) ? fallbackPrice : orderPrice;
+  const filledSize  = sizeMatched > 0 ? sizeMatched : fallbackSize;
+  const filled    = status === "MATCHED" || status === "MINED" || sizeMatched > 0;
+  const cancelled = status === "CANCELLED" || status === "EXPIRED";
+  return { filled, cancelled, fillPrice, filledSize };
+}
+
+async function activatePendingPositions(): Promise<void> {
+  const inflight = await db
+    .select()
+    .from(positionsTable)
+    .where(
+      inArray(positionsTable.status, ["pending", "closing"]),
+    );
+
+  if (inflight.length === 0) return;
+
+  const client = await buildClobClient();
+  if (!client) return;
+
+  for (const pos of inflight) {
+    try {
+      if (pos.status === "pending") {
+        if (!pos.orderId) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const order: any = await client.getOrder(pos.orderId);
+        const { filled, cancelled, fillPrice, filledSize } = parseOrderFill(order, pos.entryPrice, pos.size);
+
+        if (filled) {
+          await db
+            .update(positionsTable)
+            .set({ status: "open", entryPrice: fillPrice, currentPrice: fillPrice, size: filledSize, pnl: 0 })
+            .where(eq(positionsTable.id, pos.id));
+          logger.info({ positionId: pos.id, fillPrice, filledSize }, "Live position activated on entry fill");
+        } else if (cancelled) {
+          await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
+          logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
+        }
+
+      } else if (pos.status === "closing") {
+        if (!pos.closeOrderId) continue;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const order: any = await client.getOrder(pos.closeOrderId);
+        const { filled, cancelled, fillPrice } = parseOrderFill(order, pos.currentPrice ?? pos.entryPrice, pos.size);
+
+        if (filled) {
+          const pnl = parseFloat(((fillPrice - pos.entryPrice) * pos.size).toFixed(4));
+          await db
+            .update(positionsTable)
+            .set({ status: "closed", closedAt: new Date(), closedPrice: fillPrice, pnl })
+            .where(eq(positionsTable.id, pos.id));
+          logger.info({ positionId: pos.id, fillPrice, pnl }, "Live position confirmed closed on sell fill");
+        } else if (cancelled) {
+          logger.warn({ positionId: pos.id, closeOrderId: pos.closeOrderId }, "Close order cancelled — resetting to open for re-close attempt next cycle");
+          await db
+            .update(positionsTable)
+            .set({ status: "open", closeOrderId: null })
+            .where(eq(positionsTable.id, pos.id));
+        }
+      }
+    } catch (err) {
+      logger.error({ err, positionId: pos.id }, "Failed to check in-flight order status");
+    }
+  }
+}
+
+export async function executeTrades(): Promise<void> {
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+  if (!config || !config.running) return;
+
+  const openPositions = await db
+    .select()
+    .from(positionsTable)
+    .where(notInArray(positionsTable.status, ["closed", "cancelled"]));
+
+  if (openPositions.length >= config.maxOpenPositions) {
+    logger.debug({ count: openPositions.length }, "Max open/pending positions reached, skipping execution");
+    return;
+  }
+
+  const slots = config.maxOpenPositions - openPositions.length;
+  const openMarketIds = new Set(openPositions.map((p) => p.marketId));
+
+  const existingSignalIds = (
+    await db
+      .select({ signalId: positionsTable.signalId })
+      .from(positionsTable)
+  )
+    .map((r) => r.signalId)
+    .filter((id): id is string => id !== null && id !== undefined);
+
+  const windowMs = (config.signalWindowSeconds ?? 300) * 1000;
+  const cutoff = new Date(Date.now() - windowMs);
+
+  const candidates = await db
+    .select()
+    .from(signalsTable)
+    .where(
+      existingSignalIds.length > 0
+        ? and(gte(signalsTable.createdAt, cutoff), notInArray(signalsTable.id, existingSignalIds))
+        : gte(signalsTable.createdAt, cutoff),
+    )
+    .orderBy(desc(signalsTable.edge))
+    .limit(slots * 3);
+
+  let executed = 0;
+
+  for (const signal of candidates) {
+    if (executed >= slots) break;
+    if (signal.edge < config.minEdge) continue;
+    if (openMarketIds.has(signal.marketId)) continue;
+
+    const [market] = await db
+      .select()
+      .from(marketsTable)
+      .where(eq(marketsTable.id, signal.marketId));
+    if (!market) continue;
+
+    const entryPrice = signal.side === "yes" ? market.yesPrice : market.noPrice;
+    const balance = config.paperBalance ?? 1000;
+    const size = Math.min(config.maxPositionSize, config.mode === "paper" ? Math.max(0, balance * 0.1) : config.maxPositionSize);
+
+    if (size <= 0) {
+      logger.warn("Insufficient paper balance, skipping trade");
+      continue;
+    }
+
+    if (config.mode === "paper") {
+      await db.insert(positionsTable).values({
+        id: randomUUID(),
+        marketId: signal.marketId,
+        signalId: signal.id,
+        side: signal.side,
+        size,
+        entryPrice,
+        currentPrice: entryPrice,
+        pnl: 0,
+        status: "open",
+      });
+
+      await db
+        .update(botConfigTable)
+        .set({ paperBalance: balance - size })
+        .where(eq(botConfigTable.id, "singleton"));
+
+      openMarketIds.add(signal.marketId);
+      executed++;
+
+      logger.info(
+        { marketId: signal.marketId, side: signal.side, size, price: entryPrice, edge: signal.edge },
+        "Paper trade opened",
+      );
+
+      await notifyTrade("opened", market.question, signal.side, size, entryPrice).catch(() => {});
+
+    } else if (config.mode === "live") {
+      if (!market.conditionId) {
+        logger.warn({ marketId: market.id }, "Market has no conditionId, cannot place live order");
+        continue;
+      }
+
+      const client = await buildClobClient();
+      if (!client) continue;
+
+      const orderId = await placeLiveOrder(client, market, signal.side, "BUY", entryPrice, size);
+      if (!orderId) continue;
+
+      await db.insert(positionsTable).values({
+        id: randomUUID(),
+        marketId: signal.marketId,
+        signalId: signal.id,
+        orderId,
+        side: signal.side,
+        size,
+        entryPrice,
+        currentPrice: entryPrice,
+        pnl: 0,
+        status: "pending",
+      });
+
+      openMarketIds.add(signal.marketId);
+      executed++;
+
+      logger.info(
+        { marketId: signal.marketId, orderId, side: signal.side, size, price: entryPrice },
+        "Live buy order submitted — position pending fill confirmation",
+      );
+    }
+  }
+
+  if (executed > 0) {
+    logger.info({ executed, mode: config.mode }, "Trade execution cycle complete");
+  }
+}
+
+export async function monitorPositions(): Promise<void> {
+  await activatePendingPositions();
+
+  const openPositions = await db
+    .select()
+    .from(positionsTable)
+    .where(eq(positionsTable.status, "open"));
+
+  if (openPositions.length === 0) return;
+
+  const [config] = await db
+    .select()
+    .from(botConfigTable)
+    .where(eq(botConfigTable.id, "singleton"));
+  if (!config) return;
+
+  const marketIds = [...new Set(openPositions.map((p) => p.marketId))];
+  const markets = marketIds.length > 0
+    ? await db.select().from(marketsTable).where(inArray(marketsTable.id, marketIds))
+    : [];
+  const marketMap = new Map(markets.map((m) => [m.id, m]));
+
+  let liveClient: unknown = null;
+
+  for (const pos of openPositions) {
+    const market = marketMap.get(pos.marketId);
+    if (!market) continue;
+
+    const currentPrice = pos.side === "yes" ? market.yesPrice : market.noPrice;
+    const priceDelta = currentPrice - pos.entryPrice;
+    const pnl = parseFloat((priceDelta * pos.size).toFixed(4));
+    const returnRatio = pos.entryPrice > 0 ? priceDelta / pos.entryPrice : 0;
+
+    const ageMs = Date.now() - new Date(pos.openedAt).getTime();
+    const shouldClose =
+      returnRatio >= TAKE_PROFIT_RATIO ||
+      returnRatio <= -STOP_LOSS_RATIO ||
+      ageMs > MAX_POSITION_AGE_MS;
+
+    if (shouldClose) {
+      const reason =
+        returnRatio >= TAKE_PROFIT_RATIO ? "take-profit" :
+        returnRatio <= -STOP_LOSS_RATIO  ? "stop-loss"   :
+        "max-age";
+
+      if (config.mode === "live") {
+        if (!liveClient) liveClient = await buildClobClient();
+
+        if (liveClient) {
+          const closeOrderId = await placeLiveOrder(
+            liveClient,
+            market,
+            pos.side,
+            "SELL",
+            currentPrice,
+            pos.size,
+          );
+
+          if (!closeOrderId) {
+            logger.warn({ positionId: pos.id }, "Could not submit live close order — retrying next cycle");
+            await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
+            continue;
+          }
+
+          logger.info({ positionId: pos.id, closeOrderId, reason }, "Live close order submitted — awaiting fill confirmation");
+          await db
+            .update(positionsTable)
+            .set({ currentPrice, pnl, status: "closing", closeOrderId })
+            .where(eq(positionsTable.id, pos.id));
+        } else {
+          await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
+          continue;
+        }
+      } else {
+        await db
+          .update(positionsTable)
+          .set({ currentPrice, pnl, status: "closed", closedAt: new Date() })
+          .where(eq(positionsTable.id, pos.id));
+
+        const refund = pos.size + pnl;
+        const newBalance = (config.paperBalance ?? 0) + Math.max(0, refund);
+        await db
+          .update(botConfigTable)
+          .set({ paperBalance: parseFloat(newBalance.toFixed(4)) })
+          .where(eq(botConfigTable.id, "singleton"));
+      }
+
+      logger.info({ positionId: pos.id, pnl, reason, mode: config.mode }, "Position close initiated");
+      if (config.mode === "paper") {
+        await notifyTrade("closed", market.question, pos.side, pos.size, currentPrice, pnl).catch(() => {});
+      }
+    } else {
+      await db
+        .update(positionsTable)
+        .set({ currentPrice, pnl })
+        .where(eq(positionsTable.id, pos.id));
+    }
+  }
+}
+
+let tradingLoopTimer: ReturnType<typeof setInterval> | null = null;
+const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+
+async function runTradingCycle(): Promise<void> {
+  try {
+    logger.info("Trading cycle start");
+    await runDiscovery();
+    await executeTrades();
+    await monitorPositions();
+    logger.info("Trading cycle complete");
+  } catch (err) {
+    logger.error({ err }, "Unhandled error in trading cycle");
+  }
+}
+
+export function startTradingLoop(): void {
+  if (tradingLoopTimer) return;
+  logger.info("Starting trading loop");
+  runTradingCycle();
+  tradingLoopTimer = setInterval(runTradingCycle, CYCLE_INTERVAL_MS);
+}
+
+export function stopTradingLoop(): void {
+  if (tradingLoopTimer) {
+    clearInterval(tradingLoopTimer);
+    tradingLoopTimer = null;
+    logger.info("Trading loop stopped");
+  }
+}
+
+export function isTradingLoopRunning(): boolean {
+  return tradingLoopTimer !== null;
 }

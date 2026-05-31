@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 interface Position {
   id: string;
   marketId: string;
+  question?: string;
   side: string;
   size: number;
   entryPrice: number;
@@ -28,7 +29,7 @@ export default function Positions() {
     refetchInterval: 10000,
   });
 
-  const open   = positions.filter((p) => p.status === "open");
+  const open   = positions.filter((p) => p.status === "open" || p.status === "pending" || p.status === "closing");
   const closed = positions.filter((p) => p.status === "closed");
   const totalPnl = closed.reduce((sum, p) => sum + (p.pnl ?? 0), 0);
 
@@ -77,7 +78,9 @@ export default function Positions() {
             >
               <div className="col-span-2">
                 <div className="font-mono text-[10px] text-muted-foreground/50 uppercase tracking-widest mb-0.5">Market</div>
-                <div className="font-mono text-xs truncate">{pos.marketId}</div>
+                <div className="font-mono text-xs truncate" title={pos.question ?? pos.marketId}>
+                  {pos.question ?? pos.marketId}
+                </div>
               </div>
               <div>
                 <div className="font-mono text-[10px] text-muted-foreground/50 uppercase tracking-widest mb-0.5">Side</div>
