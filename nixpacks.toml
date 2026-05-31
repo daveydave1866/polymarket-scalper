@@ -15,4 +15,4 @@ cmds = [
 ]
 
 [start]
-cmd = "pnpm --filter @workspace/db push && NODE_ENV=production node artifacts/api-server/dist/index.js"
+cmd = "bash scripts/start-production.sh"
