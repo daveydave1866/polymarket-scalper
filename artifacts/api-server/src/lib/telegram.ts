@@ -1,6 +1,7 @@
 import { db, botConfigTable, positionsTable, signalsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
+import { resolveTelegramCredentials } from "./credentials.js";
 
 async function sendMessage(token: string, chatId: string, text: string) {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
@@ -16,11 +17,12 @@ async function sendMessage(token: string, chatId: string, text: string) {
 }
 
 export async function sendDailyReport() {
-  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
-  if (!config?.telegramBotToken || !config?.telegramChatId) {
+  const creds = await resolveTelegramCredentials();
+  if (!creds) {
     throw new Error("Telegram not configured");
   }
 
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
   const positions = await db.select().from(positionsTable);
   const signals = await db.select().from(signalsTable);
 
@@ -31,8 +33,8 @@ export async function sendDailyReport() {
   const report = [
     `*📊 Polymarket Bot — Daily Report*`,
     ``,
-    `Mode: \`${config.mode}\``,
-    `Running: \`${config.running ? "Yes" : "No"}\``,
+    `Mode: \`${config?.mode ?? "unknown"}\``,
+    `Running: \`${config?.running ? "Yes" : "No"}\``,
     ``,
     `*Signals generated:* ${signals.length}`,
     `*Trades executed:* ${positions.length}`,
@@ -43,7 +45,7 @@ export async function sendDailyReport() {
     `_Generated at ${new Date().toUTCString()}_`,
   ].join("\n");
 
-  await sendMessage(config.telegramBotToken, config.telegramChatId, report);
+  await sendMessage(creds.botToken, creds.chatId, report);
   logger.info("Daily report sent via Telegram");
 }
 
@@ -55,8 +57,8 @@ export async function notifyTrade(
   price: number,
   pnl?: number
 ) {
-  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
-  if (!config?.telegramBotToken || !config?.telegramChatId) return;
+  const creds = await resolveTelegramCredentials();
+  if (!creds) return;
 
   const emoji = action === "opened" ? "🟢" : pnl && pnl >= 0 ? "✅" : "🔴";
   const msg = [
@@ -67,7 +69,7 @@ export async function notifyTrade(
   ].join("\n");
 
   try {
-    await sendMessage(config.telegramBotToken, config.telegramChatId, msg);
+    await sendMessage(creds.botToken, creds.chatId, msg);
   } catch (err) {
     logger.error({ err }, "Failed to send trade notification");
   }

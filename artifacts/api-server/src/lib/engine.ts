@@ -2,6 +2,9 @@ import { db, marketsTable, signalsTable, botConfigTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
+import { resolvePolymarketCredentials } from "./credentials.js";
+
+export { resolvePolymarketCredentials };
 
 export let lastDiscoveryAt: Date | null = null;
 
