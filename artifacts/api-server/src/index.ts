@@ -8,6 +8,7 @@ import dataRouter from "./routes/data.js";
 import { db, botConfigTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { startTradingLoop } from "./lib/engine.js";
+import { seedCredentialsFromEnv } from "./lib/credentials.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -57,6 +58,8 @@ app.listen(PORT, "0.0.0.0", async () => {
         .returning();
       logger.info("Bot config initialized with defaults");
     }
+
+    await seedCredentialsFromEnv();
 
     if (config?.running) {
       logger.info("Bot was running before restart — resuming trading loop");

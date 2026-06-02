@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { logger } from "./logger.js";
 import type { GetCredentialsStatusResponseType } from "@workspace/api-zod";
 
+const SENTINEL = "••••••••";
+
 type DbConfig = typeof botConfigTable.$inferSelect;
 
 async function getConfig(): Promise<DbConfig | null> {
@@ -14,6 +16,50 @@ async function getConfig(): Promise<DbConfig | null> {
     return config ?? null;
   } catch {
     return null;
+  }
+}
+
+export async function seedCredentialsFromEnv(): Promise<void> {
+  try {
+    const [config] = await db
+      .select()
+      .from(botConfigTable)
+      .where(eq(botConfigTable.id, "singleton"));
+
+    if (!config) return;
+
+    const updates: Partial<typeof botConfigTable.$inferInsert> = {};
+
+    if (process.env.POLYMARKET_PRIVATE_KEY && !config.polymarketPrivateKey)
+      updates.polymarketPrivateKey = SENTINEL;
+    if (process.env.POLYMARKET_API_KEY && !config.polymarketApiKey)
+      updates.polymarketApiKey = SENTINEL;
+    if (process.env.POLYMARKET_API_SECRET && !config.polymarketApiSecret)
+      updates.polymarketApiSecret = SENTINEL;
+    if (process.env.POLYMARKET_API_PASSPHRASE && !config.polymarketApiPassphrase)
+      updates.polymarketApiPassphrase = SENTINEL;
+    if (process.env.TELEGRAM_BOT_TOKEN && !config.telegramBotToken)
+      updates.telegramBotToken = SENTINEL;
+    if (process.env.TELEGRAM_CHAT_ID && !config.telegramChatId)
+      updates.telegramChatId = SENTINEL;
+    if (process.env.SPORTS_API_KEY && !config.sportsApiKey)
+      updates.sportsApiKey = SENTINEL;
+    if (process.env.WEATHER_API_KEY && !config.weatherApiKey)
+      updates.weatherApiKey = SENTINEL;
+
+    if (Object.keys(updates).length === 0) return;
+
+    await db
+      .update(botConfigTable)
+      .set(updates)
+      .where(eq(botConfigTable.id, "singleton"));
+
+    logger.info(
+      { fields: Object.keys(updates) },
+      "Seeded masked sentinels for env-var credentials"
+    );
+  } catch (err) {
+    logger.warn({ err }, "Could not seed credentials from env vars");
   }
 }
 
