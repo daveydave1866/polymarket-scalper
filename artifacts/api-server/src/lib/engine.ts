@@ -825,32 +825,29 @@ export async function monitorPositions(userId: string): Promise<void> {
           .set({ currentPrice, pnl, status: "closing", closeOrderId, closeOrderPlacedAt: new Date() })
           .where(eq(positionsTable.id, pos.id));
       } else {
-        await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
-        continue;
-      }
-    } else {
-      await db
-        .update(positionsTable)
-        .set({ currentPrice, pnl, status: "closed", closedAt: new Date(), closedPrice: currentPrice })
-        .where(eq(positionsTable.id, pos.id));
+        // Paper mode: close immediately
+        await db
+          .update(positionsTable)
+          .set({ currentPrice, pnl, status: "closed", closedAt: new Date(), closedPrice: currentPrice })
+          .where(eq(positionsTable.id, pos.id));
 
-      const refund = pos.size + pnl;
-      const newBalance = (config.paperBalance ?? 0) + Math.max(0, refund);
-      await db
-        .update(botConfigTable)
-        .set({ paperBalance: parseFloat(newBalance.toFixed(4)) })
-        .where(eq(botConfigTable.id, userId));
+        const refund = pos.size + pnl;
+        const newBalance = (config.paperBalance ?? 0) + Math.max(0, refund);
+        await db
+          .update(botConfigTable)
+          .set({ paperBalance: parseFloat(newBalance.toFixed(4)) })
+          .where(eq(botConfigTable.id, userId));
 
-      logger.info({ positionId: pos.id, pnl, reason: shouldClose ? "tp/sl/age" : "update", mode: config.mode }, "Position close initiated");
-      if (config.mode === "paper") {
+        logger.info({ positionId: pos.id, pnl, reason }, "Paper position closed");
         await notifyTrade("closed", market.question, pos.side, pos.size, currentPrice, pnl).catch(() => {});
       }
+    } else {
+      // Not closing — just update current price / PnL
+      await db
+        .update(positionsTable)
+        .set({ currentPrice, pnl })
+        .where(eq(positionsTable.id, pos.id));
     }
-
-    await db
-      .update(positionsTable)
-      .set({ currentPrice, pnl })
-      .where(eq(positionsTable.id, pos.id));
   }
 }
 

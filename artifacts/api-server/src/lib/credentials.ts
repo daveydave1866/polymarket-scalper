@@ -136,7 +136,7 @@ export async function getCredentialsStatus(userId: string): Promise<GetCredentia
   return { polymarket, telegram, sportsApi, weatherApi };
 }
 
-export async function resolveTelegramCredentials(userId: string): Promise<TelegramCredentials | null> {
+export async function resolveTelegramCredentials(userId?: string): Promise<TelegramCredentials | null> {
   const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
   const envChatId = process.env.TELEGRAM_CHAT_ID;
 
@@ -144,11 +144,13 @@ export async function resolveTelegramCredentials(userId: string): Promise<Telegr
     return { botToken: envBotToken, chatId: envChatId };
   }
 
+  if (!userId) return null;
+
   const config = await getConfig(userId);
   if (!config) return null;
 
-  const botToken = envBotToken ?? config.telegramBotToken;
-  const chatId = envChatId ?? config.telegramChatId;
+  const botToken = config.telegramBotToken;
+  const chatId = config.telegramChatId;
 
   if (!botToken || !chatId) return null;
 

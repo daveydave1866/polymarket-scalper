@@ -70,7 +70,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
     const allUsers = await db.select({ id: usersTable.id }).from(usersTable);
     const isFirstUser = allUsers.length === 0;
-    const assignedRole = isFirstUser ? "admin" : (role === "admin" ? "admin" : "user");
+    const assignedRole = isFirstUser ? "admin" : "user";
 
     const passwordHash = await bcrypt.hash(password, 12);
     const userId = randomUUID();
