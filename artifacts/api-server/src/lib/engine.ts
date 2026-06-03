@@ -1,10 +1,11 @@
 import { db, marketsTable, signalsTable, botConfigTable, positionsTable, balanceSnapshotsTable } from "@workspace/db";
-import { eq, gte, desc, and, inArray, notInArray } from "drizzle-orm";
+import { eq, gte, desc, and, inArray, notInArray, ne } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
 import { resolvePolymarketCredentials } from "./credentials.js";
 import { ethers } from "ethers";
 import { notifyTrade, notifySignalDigest, notifyError, sendDailyReport } from "./telegram.js";
+import { generateWeatherSignals } from "./weather-signals.js";
 
 export { resolvePolymarketCredentials };
 
@@ -155,7 +156,14 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
   lastDiscoveryAt = new Date();
   logger.info({ synced, total: markets.length }, "Market discovery complete");
 
+  const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+  const minEdge = cfg?.minEdge ?? 0.05;
+
   await generateSignals();
+  const weatherSignals = await generateWeatherSignals(minEdge);
+  if (weatherSignals > 0) {
+    logger.info({ weatherSignals }, "NWS weather signals generated");
+  }
 
   return { synced, total: markets.length, lastSyncAt: lastDiscoveryAt.toISOString() };
 }
@@ -168,7 +176,9 @@ async function generateSignals() {
   const priceMax = config.priceMax ?? 0.95;
   const minTtrHours = config.minTtrHours ?? 24;
 
-  const markets = await db.select().from(marketsTable).where(eq(marketsTable.isTracked, true));
+  const markets = await db.select().from(marketsTable).where(
+    and(eq(marketsTable.isTracked, true), ne(marketsTable.category, "weather"))
+  );
 
   const pendingNotifications: Array<{ id: string; question: string; side: string; edge: number; confidence: number }> = [];
 
