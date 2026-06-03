@@ -334,7 +334,7 @@ function L2KeyGenerator({ isSet, hasL1, onSave }: { isSet: boolean; hasL1: boole
             </div>
           ))}
           <Button type="button" size="sm"
-            onClick={() => { if (result) { onSave(result.apiKey, result.apiSecret, result.apiPassphrase); setPk(""); setResult(null); } }}
+            onClick={() => { if (result) { onSave(result.apiKey, result.apiSecret, result.apiPassphrase); setResult(null); } }}
             className="w-full font-mono text-[10px] tracking-widest rounded-none h-9 bg-primary text-primary-foreground hover:bg-primary/90"
             data-testid="button-save-l2">
             <Save className="w-3.5 h-3.5 mr-2" />SAVE ALL L2 CREDENTIALS TO BOT
