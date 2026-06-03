@@ -347,7 +347,7 @@ async function placeLiveOrder(
       return null;
     }
 
-    const order = await client.createLimitOrder({ tokenID: tokenId, price, size, side: clobSide });
+    const order = await client.createOrder({ tokenID: tokenId, price, size, side: clobSide });
     const response = await client.postOrder(order, "GTC");
     const orderId: string = response?.orderID ?? response?.order_id ?? response?.id ?? randomUUID();
     logger.info({ conditionId: market.conditionId, side, clobSide, price, size, orderId }, "Live order submitted");
@@ -416,7 +416,7 @@ async function activatePendingPositions(): Promise<void> {
             // so no further fills can desync recorded position size from actual exposure.
             let residualCancelled = false;
             try {
-              await client.cancelOrder(pos.orderId);
+              await client.cancelOrder({ orderID: pos.orderId });
               residualCancelled = true;
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
@@ -459,7 +459,7 @@ async function activatePendingPositions(): Promise<void> {
             logger.warn({ positionId: pos.id, orderId: pos.orderId, ageMs }, "Pending entry order stale — attempting cancel");
             let cancelConfirmed = false;
             try {
-              await client.cancelOrder(pos.orderId);
+              await client.cancelOrder({ orderID: pos.orderId });
               cancelConfirmed = true;
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
@@ -527,7 +527,7 @@ async function activatePendingPositions(): Promise<void> {
             // the remaining exposure and accumulate realized P&L for future reference.
             let residualCancelled = false;
             try {
-              await client.cancelOrder(pos.closeOrderId);
+              await client.cancelOrder({ orderID: pos.closeOrderId! });
               residualCancelled = true;
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
@@ -572,7 +572,7 @@ async function activatePendingPositions(): Promise<void> {
             logger.warn({ positionId: pos.id, closeOrderId: pos.closeOrderId, ageMs }, "Closing order stale — attempting cancel");
             let cancelConfirmed = false;
             try {
-              await client.cancelOrder(pos.closeOrderId);
+              await client.cancelOrder({ orderID: pos.closeOrderId! });
               cancelConfirmed = true;
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
