@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Zap, Loader2 } from "lucide-react";
+import { Bell, BellOff, Zap, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Signal {
@@ -9,12 +9,23 @@ interface Signal {
   confidence: number;
   edge: number;
   source: string;
+  notified: boolean;
   createdAt: string;
+}
+
+interface BotConfig {
+  notifyMinEdge?: number;
 }
 
 async function fetchSignals(): Promise<Signal[]> {
   const res = await fetch("/api/signals");
   if (!res.ok) return [];
+  return res.json();
+}
+
+async function fetchConfig(): Promise<BotConfig> {
+  const res = await fetch("/api/bot/config");
+  if (!res.ok) return {};
   return res.json();
 }
 
@@ -25,13 +36,32 @@ export default function Signals() {
     refetchInterval: 5000,
   });
 
+  const { data: config } = useQuery({
+    queryKey: ["bot-config"],
+    queryFn: fetchConfig,
+    staleTime: 30_000,
+  });
+
+  const notifyMinEdge = config?.notifyMinEdge ?? 0.10;
+  const alertedCount = signals.filter((s) => s.notified).length;
+
   return (
     <div className="space-y-6 animate-fade-up">
-      <div>
-        <h1 className="text-3xl font-bold font-mono tracking-tight">SIGNALS</h1>
-        <p className="font-mono text-xs text-muted-foreground/60 mt-1 uppercase tracking-wider">
-          {signals.length} signals generated
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold font-mono tracking-tight">SIGNALS</h1>
+          <p className="font-mono text-xs text-muted-foreground/60 mt-1 uppercase tracking-wider">
+            {signals.length} signals generated &mdash; {alertedCount} alerted
+          </p>
+        </div>
+        <div className="border border-border bg-card px-3 py-2 text-right shrink-0">
+          <div className="font-mono text-[9px] text-muted-foreground/50 uppercase tracking-widest mb-0.5">
+            Alert threshold
+          </div>
+          <div className="font-mono text-xs text-amber-400 tabular-nums">
+            Edge &ge; {(notifyMinEdge * 100).toFixed(0)}%
+          </div>
+        </div>
       </div>
 
       {isLoading ? (
@@ -51,7 +81,7 @@ export default function Signals() {
           {signals.map((sig) => (
             <div
               key={sig.id}
-              className="border border-border bg-card p-4 grid grid-cols-5 gap-4 items-center"
+              className="border border-border bg-card p-4 grid grid-cols-6 gap-4 items-center"
               data-testid={`row-signal-${sig.id}`}
             >
               <div className="col-span-2">
@@ -79,6 +109,19 @@ export default function Signals() {
                 <div className="font-mono text-[9px] text-muted-foreground/40">
                   {new Date(sig.createdAt).toLocaleTimeString()}
                 </div>
+              </div>
+              <div className="flex justify-end">
+                {sig.notified ? (
+                  <span className="inline-flex items-center gap-1 border border-primary/40 bg-primary/10 text-primary px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest">
+                    <Bell className="w-2.5 h-2.5" />
+                    Alerted
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 border border-border bg-muted/20 text-muted-foreground/50 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest">
+                    <BellOff className="w-2.5 h-2.5" />
+                    Silent
+                  </span>
+                )}
               </div>
             </div>
           ))}

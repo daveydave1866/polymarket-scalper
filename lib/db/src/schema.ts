@@ -53,6 +53,7 @@ export const signalsTable = pgTable("signals", {
   confidence: real("confidence").notNull().default(0),
   edge: real("edge").notNull().default(0),
   source: text("source").notNull().default("engine"),
+  notified: boolean("notified").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

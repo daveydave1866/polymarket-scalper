@@ -228,6 +228,7 @@ async function generateSignals() {
           confidence,
           edge,
           source: "price_skew",
+          notified: false,
         });
         pendingNotifications.push({ id, question: market.question, side, edge, confidence });
       }
@@ -245,6 +246,14 @@ async function generateSignals() {
   await notifySignalDigest(
     toNotify.map((s) => ({ market: s.question, side: s.side, edge: s.edge, confidence: s.confidence }))
   ).catch(() => {});
+
+  if (toNotify.length > 0) {
+    const notifiedIds = toNotify.map((s) => s.id);
+    await db
+      .update(signalsTable)
+      .set({ notified: true })
+      .where(inArray(signalsTable.id, notifiedIds));
+  }
 
   if (pendingNotifications.length > 0) {
     logger.info(
