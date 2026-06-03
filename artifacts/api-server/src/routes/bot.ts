@@ -260,9 +260,12 @@ router.put("/bot/config", async (req, res): Promise<void> => {
 
     const safeRest = { ...rest } as Record<string, unknown>;
     for (const field of secretFields) {
-      if (safeRest[field] === SENTINEL || safeRest[field] === "") {
-        delete safeRest[field];
+      if (safeRest[field] === SENTINEL || safeRest[field] === undefined) {
+        delete safeRest[field]; // unchanged — keep existing DB value
+      } else if (safeRest[field] === "") {
+        safeRest[field] = null; // user explicitly cleared — write NULL to remove
       }
+      // else: non-empty string → save as new credential value
     }
 
     const [updated] = await db

@@ -45,10 +45,6 @@ const configSchema = z.object({
 
 type ConfigForm = z.infer<typeof configSchema>;
 
-const SECRET_FIELDS: (keyof ConfigForm)[] = [
-  "polymarketPrivateKey", "polymarketApiKey", "polymarketApiSecret",
-  "polymarketApiPassphrase", "telegramBotToken", "sportsApiKey", "weatherApiKey",
-];
 
 async function apiPost(path: string, body: object) {
   const key = getStoredKey();
@@ -389,7 +385,13 @@ function TelegramSetup({ hasBotToken, hasChatId, control, form }: {
             <FormControl>
               <div className="relative">
                 <Input type={showToken ? "text" : "password"}
-                  placeholder="1234567890:ABCdefGHIjklMNOpqrSTU…"
+                  placeholder={
+                    field.value === SENTINEL
+                      ? "Leave blank to keep existing"
+                      : hasBotToken
+                      ? "Clear — will be removed on save"
+                      : "1234567890:ABCdefGHIjklMNOpqrSTU…"
+                  }
                   {...field}
                   value={field.value === SENTINEL ? "" : (field.value ?? "")}
                   className="font-mono text-xs rounded-none bg-background border-border h-9 focus:border-sky-400/50 pr-9 tracking-wide"
@@ -402,7 +404,7 @@ function TelegramSetup({ hasBotToken, hasChatId, control, form }: {
               </div>
             </FormControl>
             <FormDescription className="font-mono text-[9px] text-muted-foreground/50">
-              {hasBotToken ? "Leave blank to keep existing token." : "Paste the token from @BotFather here."}
+              {hasBotToken ? "Leave blank to keep existing. Clear the field to remove the token." : "Paste the token from @BotFather here."}
             </FormDescription>
             <FormMessage className="font-mono text-[10px]" />
           </FormItem>
@@ -631,11 +633,15 @@ export default function Settings() {
         signalWindowSeconds: config.signalWindowSeconds,
         notifyMinEdge: config.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
-        polymarketPrivateKey: "", polymarketApiKey: "", polymarketApiSecret: "",
-        polymarketApiPassphrase: "", telegramBotToken: "",
-        telegramChatId: config.telegramChatId ?? "",
-        dailyReportHour: config.dailyReportHour ?? 8,
-        sportsApiKey: "", weatherApiKey: "",
+        polymarketPrivateKey:    config.polymarketPrivateKey    ? SENTINEL : "",
+        polymarketApiKey:        config.polymarketApiKey        ? SENTINEL : "",
+        polymarketApiSecret:     config.polymarketApiSecret     ? SENTINEL : "",
+        polymarketApiPassphrase: config.polymarketApiPassphrase ? SENTINEL : "",
+        telegramBotToken:        config.telegramBotToken        ? SENTINEL : "",
+        telegramChatId:          config.telegramChatId ?? "",
+        dailyReportHour:         config.dailyReportHour ?? 8,
+        sportsApiKey:            config.sportsApiKey            ? SENTINEL : "",
+        weatherApiKey:           config.weatherApiKey           ? SENTINEL : "",
       });
     }
   }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -664,18 +670,19 @@ export default function Settings() {
   }, [updateConfig, toast, queryClient]);
 
   const onSubmit = (values: ConfigForm) => {
-    const payload = { ...values } as Record<string, unknown>;
-    for (const k of SECRET_FIELDS) {
-      if (!payload[k] || payload[k] === "" || payload[k] === SENTINEL) delete payload[k];
-    }
-    updateConfig.mutate({ data: payload as never }, {
+    updateConfig.mutate({ data: values as never }, {
       onSuccess: (newConfig) => {
         toast({ title: "Configuration saved" });
         queryClient.setQueryData(getGetBotConfigQueryKey(), newConfig);
         form.reset({
           ...form.getValues(),
-          polymarketPrivateKey: "", polymarketApiKey: "", polymarketApiSecret: "",
-          polymarketApiPassphrase: "", telegramBotToken: "", sportsApiKey: "", weatherApiKey: "",
+          polymarketPrivateKey:    newConfig.polymarketPrivateKey    ? SENTINEL : "",
+          polymarketApiKey:        newConfig.polymarketApiKey        ? SENTINEL : "",
+          polymarketApiSecret:     newConfig.polymarketApiSecret     ? SENTINEL : "",
+          polymarketApiPassphrase: newConfig.polymarketApiPassphrase ? SENTINEL : "",
+          telegramBotToken:        newConfig.telegramBotToken        ? SENTINEL : "",
+          sportsApiKey:            newConfig.sportsApiKey            ? SENTINEL : "",
+          weatherApiKey:           newConfig.weatherApiKey           ? SENTINEL : "",
         });
       },
       onError: () => toast({ variant: "destructive", title: "Error", description: "Failed to update configuration." }),
@@ -802,7 +809,13 @@ export default function Settings() {
                       <FormControl>
                         <RevealInput
                           value={field.value === SENTINEL ? "" : (field.value ?? "")}
-                          placeholder={isSet ? "Leave blank to keep existing" : "Paste value…"}
+                          placeholder={
+                            field.value === SENTINEL
+                              ? "Leave blank to keep existing"
+                              : isSet
+                              ? "Clear — will be removed on save"
+                              : "Paste value…"
+                          }
                           onChange={field.onChange}
                         />
                       </FormControl>
@@ -838,7 +851,13 @@ export default function Settings() {
                     <FormControl>
                       <RevealInput
                         value={field.value === SENTINEL ? "" : (field.value ?? "")}
-                        placeholder={isSet ? "Leave blank to keep existing" : "Paste API key…"}
+                        placeholder={
+                          field.value === SENTINEL
+                            ? "Leave blank to keep existing"
+                            : isSet
+                            ? "Clear — will be removed on save"
+                            : "Paste API key…"
+                        }
                         onChange={field.onChange}
                       />
                     </FormControl>
