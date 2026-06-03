@@ -1,1 +1,3 @@
 - [Railway deployment quirks](railway-deployment.md) — nixpacks pnpm PATH issue; lib packages need compiled dist; snapshot caching forces service recreate to bust
+- [Multi-user engine pattern](multi-user-engine.md) — per-user state held in Maps keyed by userId; all engine functions take userId; monitorPositions paper-close logic pitfall documented
+- [Auth security rules](auth-security.md) — JWT secret must come from env (no hardcoded fallback); no plaintext passwords in logs; register must not allow self-assigned admin role
