@@ -97,6 +97,22 @@ export async function notifySignal(
   }
 }
 
+export async function notifyBotEvent(event: "started" | "stopped", mode?: string) {
+  const creds = await resolveTelegramCredentials();
+  if (!creds) return;
+
+  const msg =
+    event === "started"
+      ? `🟢 *Bot started* (\`${mode ?? "unknown"}\` mode)`
+      : `⏹ *Bot stopped*`;
+
+  try {
+    await sendMessage(creds.botToken, creds.chatId, msg);
+  } catch (err) {
+    logger.error({ err }, "Failed to send bot event notification");
+  }
+}
+
 export async function notifyError(message: string, detail?: string) {
   const creds = await resolveTelegramCredentials();
   if (!creds) return;

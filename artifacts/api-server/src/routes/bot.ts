@@ -13,7 +13,7 @@ import {
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
 import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop, lastCycleAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
-import { sendDailyReport } from "../lib/telegram.js";
+import { sendDailyReport, notifyBotEvent } from "../lib/telegram.js";
 import { getCredentialsStatus } from "../lib/credentials.js";
 import { GetCredentialsStatusResponse } from "@workspace/api-zod";
 import { ethers } from "ethers";
@@ -96,6 +96,7 @@ router.post("/bot/start", async (_req, res): Promise<void> => {
     logger.info("Bot started");
 
     const config = await getOrCreateConfig();
+    notifyBotEvent("started", config.mode).catch(() => {});
     const signals = await db.select().from(signalsTable);
     const positions = await db.select().from(positionsTable);
 
@@ -125,6 +126,7 @@ router.post("/bot/stop", async (_req, res): Promise<void> => {
 
     stopTradingLoop();
     logger.info("Bot stopped");
+    notifyBotEvent("stopped").catch(() => {});
 
     const signals = await db.select().from(signalsTable);
     const positions = await db.select().from(positionsTable);
