@@ -9,7 +9,9 @@ import { logger } from "../lib/logger.js";
 const router: IRouter = Router();
 
 function getJwtSecret(): string {
-  return process.env.JWT_SECRET ?? process.env.BOT_API_KEY ?? "polymarket-scalper-secret";
+  const secret = process.env.JWT_SECRET ?? process.env.BOT_API_KEY;
+  if (!secret) throw new Error("JWT_SECRET or BOT_API_KEY environment variable must be set");
+  return secret;
 }
 
 router.post("/auth/login", async (req, res): Promise<void> => {

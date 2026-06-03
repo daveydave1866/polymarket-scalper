@@ -106,7 +106,7 @@ app.listen(PORT, "0.0.0.0", async () => {
       }
 
       await seedCredentialsFromEnv(adminId);
-      logger.info({ username: adminUsername }, `First admin created — password: ${adminPassword}`);
+      logger.info({ username: adminUsername }, "First admin created — change the default password immediately");
 
       if (botConfig?.running) {
         logger.info({ userId: adminId }, "Bot was running before restart — resuming trading loop");
