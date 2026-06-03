@@ -4,7 +4,7 @@ import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
 import { resolvePolymarketCredentials } from "./credentials.js";
 import { ethers } from "ethers";
-import { notifyTrade, notifySignal, notifyError, sendDailyReport } from "./telegram.js";
+import { notifyTrade, notifySignalDigest, notifyError, sendDailyReport } from "./telegram.js";
 
 export { resolvePolymarketCredentials };
 
@@ -242,9 +242,9 @@ async function generateSignals() {
     .sort((a, b) => b.edge - a.edge)
     .slice(0, notifyMaxPerCycle);
 
-  for (const s of toNotify) {
-    await notifySignal(s.question, s.side, s.edge, s.confidence).catch(() => {});
-  }
+  await notifySignalDigest(
+    toNotify.map((s) => ({ market: s.question, side: s.side, edge: s.edge, confidence: s.confidence }))
+  ).catch(() => {});
 
   if (pendingNotifications.length > 0) {
     logger.info(

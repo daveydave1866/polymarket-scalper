@@ -75,25 +75,31 @@ export async function notifyTrade(
   }
 }
 
-export async function notifySignal(
-  market: string,
-  side: string,
-  edge: number,
-  confidence: number
+export async function notifySignalDigest(
+  signals: Array<{ market: string; side: string; edge: number; confidence: number }>
 ) {
+  if (signals.length === 0) return;
+
   const creds = await resolveTelegramCredentials();
   if (!creds) return;
 
+  const rows = signals.map((s, i) => {
+    const truncated = s.market.length > 48 ? s.market.slice(0, 45) + "…" : s.market;
+    return `${i + 1}. ${truncated}\n   \`${s.side.toUpperCase()}\`  Edge: \`${(s.edge * 100).toFixed(1)}%\`  Conf: \`${(s.confidence * 100).toFixed(0)}%\``;
+  });
+
   const msg = [
-    `📡 *Signal Fired*`,
-    `Market: ${market}`,
-    `Side: \`${side.toUpperCase()}\`  |  Edge: \`${(edge * 100).toFixed(1)}%\`  |  Confidence: \`${(confidence * 100).toFixed(0)}%\``,
+    `📡 *Signal Digest — ${signals.length} signal${signals.length === 1 ? "" : "s"}*`,
+    ``,
+    ...rows,
+    ``,
+    `_${new Date().toUTCString()}_`,
   ].join("\n");
 
   try {
     await sendMessage(creds.botToken, creds.chatId, msg);
   } catch (err) {
-    logger.error({ err }, "Failed to send signal notification");
+    logger.error({ err }, "Failed to send signal digest");
   }
 }
 
