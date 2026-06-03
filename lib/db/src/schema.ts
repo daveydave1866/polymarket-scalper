@@ -22,6 +22,7 @@ export const botConfigTable = pgTable("bot_config", {
   weatherApiKey: text("weather_api_key"),
   notifyMinEdge: real("notify_min_edge").notNull().default(0.10),
   notifyMaxPerCycle: integer("notify_max_per_cycle").notNull().default(5),
+  partialFillThreshold: real("partial_fill_threshold").notNull().default(0.5),
 });
 
 export const marketsTable = pgTable("markets", {
@@ -63,6 +64,7 @@ export const positionsTable = pgTable("positions", {
   entryPrice: real("entry_price").notNull().default(0),
   currentPrice: real("current_price"),
   pnl: real("pnl").default(0),
+  realizedPnl: real("realized_pnl").default(0),
   status: text("status").notNull().default("open"),
   openedAt: timestamp("opened_at").defaultNow().notNull(),
   closedAt: timestamp("closed_at"),

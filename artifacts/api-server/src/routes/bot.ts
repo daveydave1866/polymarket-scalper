@@ -235,6 +235,7 @@ router.get("/bot/config", async (_req, res): Promise<void> => {
         weatherApiKey: config.weatherApiKey ? "••••••••" : undefined,
         notifyMinEdge: config.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
+        partialFillThreshold: config.partialFillThreshold ?? 0.5,
       })
     );
   } catch (err) {
@@ -303,6 +304,7 @@ router.put("/bot/config", async (req, res): Promise<void> => {
         weatherApiKey: updated.weatherApiKey ? "••••••••" : undefined,
         notifyMinEdge: updated.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: updated.notifyMaxPerCycle ?? 5,
+        partialFillThreshold: updated.partialFillThreshold ?? 0.5,
       })
     );
   } catch (err) {

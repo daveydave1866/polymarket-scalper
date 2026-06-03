@@ -342,12 +342,16 @@ async function placeLiveOrder(
 function parseOrderFill(order: any, fallbackPrice: number, fallbackSize: number) {
   const status: string = order?.status ?? order?.orderStatus ?? "";
   const sizeMatched = parseFloat(order?.size_matched ?? order?.sizeMatched ?? "0");
+  const orderSize   = parseFloat(order?.size ?? order?.originalSize ?? String(fallbackSize));
   const orderPrice  = parseFloat(order?.price ?? order?.originalPrice ?? String(fallbackPrice));
   const fillPrice   = isNaN(orderPrice) ? fallbackPrice : orderPrice;
   const filledSize  = sizeMatched > 0 ? sizeMatched : fallbackSize;
-  const filled    = status === "MATCHED" || status === "MINED" || sizeMatched > 0;
-  const cancelled = status === "CANCELLED" || status === "EXPIRED";
-  return { filled, cancelled, fillPrice, filledSize };
+  const totalSize   = isNaN(orderSize) || orderSize <= 0 ? fallbackSize : orderSize;
+  const fillRatio   = totalSize > 0 ? sizeMatched / totalSize : 0;
+  const fullyFilled = (status === "MATCHED" || status === "MINED") || (sizeMatched > 0 && sizeMatched >= totalSize);
+  const anyFilled   = sizeMatched > 0;
+  const cancelled   = status === "CANCELLED" || status === "EXPIRED";
+  return { fullyFilled, anyFilled, fillRatio, cancelled, fillPrice, filledSize, totalSize };
 }
 
 async function activatePendingPositions(): Promise<void> {
@@ -360,6 +364,9 @@ async function activatePendingPositions(): Promise<void> {
 
   if (inflight.length === 0) return;
 
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+  const partialFillThreshold = config?.partialFillThreshold ?? 0.5;
+
   const client = await buildClobClient();
   if (!client) return;
 
@@ -369,23 +376,57 @@ async function activatePendingPositions(): Promise<void> {
         if (!pos.orderId) continue;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const order: any = await client.getOrder(pos.orderId);
-        const { filled, cancelled, fillPrice, filledSize } = parseOrderFill(order, pos.entryPrice, pos.size);
+        const { fullyFilled, anyFilled, fillRatio, cancelled, fillPrice, filledSize } = parseOrderFill(order, pos.entryPrice, pos.size);
 
-        if (filled) {
+        const shouldActivate = fullyFilled || (anyFilled && fillRatio >= partialFillThreshold);
+
+        if (cancelled) {
+          await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
+          logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
+        } else if (shouldActivate) {
+          if (!fullyFilled) {
+            // Partial fill above threshold: cancel remaining open order quantity
+            // so no further fills can desync recorded position size from actual exposure.
+            let residualCancelled = false;
+            try {
+              await client.cancelOrder(pos.orderId);
+              residualCancelled = true;
+            } catch (cancelErr) {
+              const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+              if (isOrderAlreadyGone(errMsg)) {
+                residualCancelled = true; // already gone — safe to proceed
+              } else {
+                logger.warn({ cancelErr, positionId: pos.id }, "Could not cancel residual entry order after partial fill — will retry next cycle");
+              }
+            }
+            if (!residualCancelled) continue; // retry next cycle once cancel succeeds
+          }
+
           await db
             .update(positionsTable)
             .set({ status: "open", entryPrice: fillPrice, currentPrice: fillPrice, size: filledSize, pnl: 0 })
             .where(eq(positionsTable.id, pos.id));
-          logger.info({ positionId: pos.id, fillPrice, filledSize }, "Live position activated on entry fill");
+
+          if (fullyFilled) {
+            logger.info({ positionId: pos.id, fillPrice, filledSize }, "Live position activated on full entry fill");
+          } else {
+            logger.info(
+              { positionId: pos.id, fillPrice, filledSize, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
+              "Live position activated on partial fill (above threshold) — residual order cancelled",
+            );
+          }
 
           const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
           if (mkt) {
             await notifyTrade("opened", mkt.question, pos.side, filledSize, fillPrice).catch(() => {});
           }
-        } else if (cancelled) {
-          await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
-          logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
         } else {
+          if (anyFilled) {
+            logger.debug(
+              { positionId: pos.id, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
+              "Partial fill below threshold — continuing to poll for more fills",
+            );
+          }
           const ageMs = Date.now() - new Date(pos.openedAt).getTime();
           if (ageMs > STALE_ORDER_TIMEOUT_MS) {
             logger.warn({ positionId: pos.id, orderId: pos.orderId, ageMs }, "Pending entry order stale — attempting cancel");
@@ -396,14 +437,30 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                logger.warn({ positionId: pos.id }, "Stale pending order already gone on exchange — voiding position");
+                logger.warn({ positionId: pos.id }, "Stale pending order already gone on exchange — checking for partial fill");
                 cancelConfirmed = true;
               } else {
                 logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale pending order failed transiently — will retry next cycle");
               }
             }
             if (cancelConfirmed) {
-              await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
+              if (anyFilled) {
+                // Some quantity traded before we timed out — activate at matched size
+                await db
+                  .update(positionsTable)
+                  .set({ status: "open", entryPrice: fillPrice, currentPrice: fillPrice, size: filledSize, pnl: 0 })
+                  .where(eq(positionsTable.id, pos.id));
+                logger.info(
+                  { positionId: pos.id, filledSize, fillRatio: fillRatio.toFixed(3) },
+                  "Stale entry order cancelled with partial fill — activating position at matched size",
+                );
+                const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
+                if (mkt) {
+                  await notifyTrade("opened", mkt.question, pos.side, filledSize, fillPrice).catch(() => {});
+                }
+              } else {
+                await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
+              }
             }
           }
         }
@@ -412,27 +469,76 @@ async function activatePendingPositions(): Promise<void> {
         if (!pos.closeOrderId) continue;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const order: any = await client.getOrder(pos.closeOrderId);
-        const { filled, cancelled, fillPrice } = parseOrderFill(order, pos.currentPrice ?? pos.entryPrice, pos.size);
+        const { fullyFilled, anyFilled, fillRatio, cancelled, fillPrice } = parseOrderFill(order, pos.currentPrice ?? pos.entryPrice, pos.size);
 
-        if (filled) {
-          const pnl = parseFloat(((fillPrice - pos.entryPrice) * pos.size).toFixed(4));
-          await db
-            .update(positionsTable)
-            .set({ status: "closed", closedAt: new Date(), closedPrice: fillPrice, pnl })
-            .where(eq(positionsTable.id, pos.id));
-          logger.info({ positionId: pos.id, fillPrice, pnl }, "Live position confirmed closed on sell fill");
+        const shouldClose = fullyFilled || (anyFilled && fillRatio >= partialFillThreshold);
 
-          const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
-          if (mkt) {
-            await notifyTrade("closed", mkt.question, pos.side, pos.size, fillPrice, pnl).catch(() => {});
-          }
-        } else if (cancelled) {
+        if (cancelled) {
           logger.warn({ positionId: pos.id, closeOrderId: pos.closeOrderId }, "Close order cancelled — resetting to open for re-close attempt next cycle");
           await db
             .update(positionsTable)
             .set({ status: "open", closeOrderId: null })
             .where(eq(positionsTable.id, pos.id));
+        } else if (shouldClose) {
+          if (fullyFilled) {
+            // Full close: record the position as closed, including any previously realized P&L.
+            const closingPnl = parseFloat(((fillPrice - pos.entryPrice) * pos.size).toFixed(4));
+            const pnl = parseFloat((closingPnl + (pos.realizedPnl ?? 0)).toFixed(4));
+            await db
+              .update(positionsTable)
+              .set({ status: "closed", closedAt: new Date(), closedPrice: fillPrice, pnl })
+              .where(eq(positionsTable.id, pos.id));
+            logger.info({ positionId: pos.id, fillPrice, pnl }, "Live position confirmed closed on full sell fill");
+
+            const [mkt] = await db.select().from(marketsTable).where(eq(marketsTable.id, pos.marketId));
+            if (mkt) {
+              await notifyTrade("closed", mkt.question, pos.side, pos.size, fillPrice, pnl).catch(() => {});
+            }
+          } else {
+            // Partial close above threshold: cancel the residual close order so no further
+            // fills can occur on this stale order, then reduce the tracked position size to
+            // the remaining exposure and accumulate realized P&L for future reference.
+            let residualCancelled = false;
+            try {
+              await client.cancelOrder(pos.closeOrderId);
+              residualCancelled = true;
+            } catch (cancelErr) {
+              const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+              if (isOrderAlreadyGone(errMsg)) {
+                residualCancelled = true; // already gone — safe to finalise
+              } else {
+                logger.warn({ cancelErr, positionId: pos.id }, "Could not cancel residual close order after partial fill — will retry next cycle");
+              }
+            }
+
+            if (residualCancelled) {
+              const closedSize = parseFloat((pos.size * fillRatio).toFixed(8));
+              const remainingSize = parseFloat((pos.size - closedSize).toFixed(8));
+              const addedRealizedPnl = parseFloat(((fillPrice - pos.entryPrice) * closedSize).toFixed(4));
+              const newRealizedPnl = parseFloat(((pos.realizedPnl ?? 0) + addedRealizedPnl).toFixed(4));
+              await db
+                .update(positionsTable)
+                .set({
+                  status: "open",
+                  closeOrderId: null,
+                  closeOrderPlacedAt: null,
+                  size: remainingSize,
+                  realizedPnl: newRealizedPnl,
+                })
+                .where(eq(positionsTable.id, pos.id));
+              logger.info(
+                { positionId: pos.id, fillPrice, closedSize, remainingSize, addedRealizedPnl, newRealizedPnl, fillRatio: fillRatio.toFixed(3) },
+                "Partial close above threshold — residual order cancelled, size reduced to remaining exposure, realized P&L accumulated",
+              );
+            }
+          }
         } else {
+          if (anyFilled) {
+            logger.debug(
+              { positionId: pos.id, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
+              "Partial close fill below threshold — continuing to poll",
+            );
+          }
           const placedAt = pos.closeOrderPlacedAt ?? pos.openedAt;
           const ageMs = Date.now() - new Date(placedAt).getTime();
           if (ageMs > STALE_ORDER_TIMEOUT_MS) {
@@ -444,17 +550,33 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                logger.warn({ positionId: pos.id }, "Stale closing order already gone on exchange — resetting to open for retry");
+                logger.warn({ positionId: pos.id }, "Stale closing order already gone on exchange — checking for partial fill");
                 cancelConfirmed = true;
               } else {
                 logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale closing order failed transiently — will retry next cycle");
               }
             }
             if (cancelConfirmed) {
-              await db
-                .update(positionsTable)
-                .set({ status: "open", closeOrderId: null, closeOrderPlacedAt: null })
-                .where(eq(positionsTable.id, pos.id));
+              if (anyFilled) {
+                // Some quantity closed before timeout — reduce size and accumulate realized P&L
+                const closedSize = parseFloat((pos.size * fillRatio).toFixed(8));
+                const remainingSize = parseFloat((pos.size - closedSize).toFixed(8));
+                const addedRealizedPnl = parseFloat(((fillPrice - pos.entryPrice) * closedSize).toFixed(4));
+                const newRealizedPnl = parseFloat(((pos.realizedPnl ?? 0) + addedRealizedPnl).toFixed(4));
+                await db
+                  .update(positionsTable)
+                  .set({ status: "open", closeOrderId: null, closeOrderPlacedAt: null, size: remainingSize, realizedPnl: newRealizedPnl })
+                  .where(eq(positionsTable.id, pos.id));
+                logger.info(
+                  { positionId: pos.id, closedSize, remainingSize, addedRealizedPnl },
+                  "Stale closing order cancelled with partial fill — position size reduced, realized P&L recorded",
+                );
+              } else {
+                await db
+                  .update(positionsTable)
+                  .set({ status: "open", closeOrderId: null, closeOrderPlacedAt: null })
+                  .where(eq(positionsTable.id, pos.id));
+              }
             }
           }
         }
@@ -629,7 +751,8 @@ export async function monitorPositions(): Promise<void> {
 
     const currentPrice = pos.side === "yes" ? market.yesPrice : market.noPrice;
     const priceDelta = currentPrice - pos.entryPrice;
-    const pnl = parseFloat((priceDelta * pos.size).toFixed(4));
+    const unrealizedPnl = parseFloat((priceDelta * pos.size).toFixed(4));
+    const pnl = parseFloat((unrealizedPnl + (pos.realizedPnl ?? 0)).toFixed(4));
     const returnRatio = pos.entryPrice > 0 ? priceDelta / pos.entryPrice : 0;
 
     const ageMs = Date.now() - new Date(pos.openedAt).getTime();

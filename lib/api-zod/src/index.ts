@@ -49,6 +49,7 @@ export const BotConfigSchema = z.object({
   weatherApiKey: z.string().optional(),
   notifyMinEdge: z.number().min(0).max(1).optional(),
   notifyMaxPerCycle: z.number().int().min(1).max(50).optional(),
+  partialFillThreshold: z.number().min(0).max(1).optional(),
 });
 
 export const GetBotConfigResponse = BotConfigSchema;
@@ -111,6 +112,7 @@ export const PositionSchema = z.object({
   entryPrice: z.number(),
   currentPrice: z.number().nullable().optional(),
   pnl: z.number().nullable().optional(),
+  realizedPnl: z.number().nullable().optional(),
   status: z.string(),
   openedAt: z.string(),
   closedAt: z.string().nullable().optional(),

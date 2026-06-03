@@ -32,6 +32,7 @@ const configSchema = z.object({
   signalWindowSeconds: z.coerce.number().min(1),
   notifyMinEdge: z.coerce.number().min(0).max(1).optional(),
   notifyMaxPerCycle: z.coerce.number().int().min(1).max(50).optional(),
+  partialFillThreshold: z.coerce.number().min(0).max(1).optional(),
   polymarketPrivateKey: z.string().optional(),
   polymarketApiKey: z.string().optional(),
   polymarketApiSecret: z.string().optional(),
@@ -623,7 +624,7 @@ export default function Settings() {
     defaultValues: {
       mode: "paper", minEdge: 0.05, maxPositionSize: 100,
       maxOpenPositions: 5, signalWindowSeconds: 300, dailyReportHour: 8,
-      notifyMinEdge: 0.10, notifyMaxPerCycle: 5,
+      notifyMinEdge: 0.10, notifyMaxPerCycle: 5, partialFillThreshold: 0.5,
     },
   });
 
@@ -648,6 +649,7 @@ export default function Settings() {
         signalWindowSeconds: config.signalWindowSeconds,
         notifyMinEdge: config.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
+        partialFillThreshold: config.partialFillThreshold ?? 0.5,
         polymarketPrivateKey:    config.polymarketPrivateKey    ? SENTINEL : "",
         polymarketApiKey:        config.polymarketApiKey        ? SENTINEL : "",
         polymarketApiSecret:     config.polymarketApiSecret     ? SENTINEL : "",
@@ -771,6 +773,7 @@ export default function Settings() {
                 { name: "signalWindowSeconds" as const, label: "Signal Expiry (s)", desc: "Seconds before signal discarded", step: "1" },
                 { name: "notifyMinEdge" as const, label: "Notify Min Edge", desc: "Min edge to fire Telegram alert (e.g. 0.10)", step: "0.01" },
                 { name: "notifyMaxPerCycle" as const, label: "Max Alerts/Cycle", desc: "Cap on Telegram signal alerts per scan", step: "1" },
+                { name: "partialFillThreshold" as const, label: "Partial Fill Min %", desc: "Min fill ratio to activate position (e.g. 0.5 = 50%)", step: "0.05" },
               ]).map(({ name, label, desc, step }) => (
                 <FormField key={name} control={form.control} name={name} render={({ field }) => (
                   <FormItem>
