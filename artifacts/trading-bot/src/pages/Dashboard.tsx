@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import {
   useGetBotStatus,
+  useGetBotConfig,
+  useGetCredentialsStatus,
   useStartBot,
   useStopBot,
   useSyncMarkets,
@@ -76,9 +78,15 @@ export default function Dashboard() {
   }, []);
 
   const { data: status, isLoading } = useGetBotStatus({ query: { refetchInterval: 3000 } });
+  const { data: config } = useGetBotConfig();
+  const { data: credStatus, isLoading: credLoading } = useGetCredentialsStatus();
   const startBot = useStartBot();
   const stopBot = useStopBot();
   const syncMarkets = useSyncMarkets();
+
+  const isLiveMode = config?.mode === "live";
+  const polymarketReady = credStatus?.polymarket?.configured === true;
+  const liveStartBlocked = isLiveMode && (credLoading || !polymarketReady);
 
   const handleStart = () => {
     startBot.mutate(undefined as never, {
@@ -181,7 +189,8 @@ export default function Dashboard() {
             <Button
               size="sm"
               onClick={handleStart}
-              disabled={startBot.isPending}
+              disabled={startBot.isPending || liveStartBlocked}
+              title={liveStartBlocked ? "Polymarket credentials required for live mode" : undefined}
               className="font-mono text-[10px] tracking-widest rounded-none h-8"
               data-testid="button-start-bot"
             >
@@ -223,6 +232,25 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Live-mode readiness warning */}
+      {isLiveMode && !polymarketReady && (
+        <div className="border border-amber-500/40 bg-amber-500/8 px-5 py-3 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-wider text-amber-400">
+              {credLoading ? "Live mode — checking credentials…" : "Live mode — credentials missing"}
+            </div>
+            {!credLoading && (
+              <div className="font-mono text-[10px] text-muted-foreground/70 mt-0.5">
+                Polymarket credentials are not configured. The bot cannot start in live mode until
+                an L1 private key and L2 API key are saved in{" "}
+                <span className="text-amber-400/80">Settings → Polymarket Credentials</span>.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
