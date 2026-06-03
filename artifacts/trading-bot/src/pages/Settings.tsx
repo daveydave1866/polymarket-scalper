@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
   useGetBotConfig, useUpdateBotConfig, getGetBotConfigQueryKey,
-  useGetCredentialsStatus,
+  useGetCredentialsStatus, useTestCredentials,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Save, Eye, EyeOff, CheckCircle2, Circle, AlertTriangle, Loader2,
   ChevronDown, ChevronRight, ExternalLink, Key, Wallet, Radio,
-  Zap, Send, Copy, Check, RefreshCw, ArrowRight, Lock,
+  Zap, Send, Copy, Check, RefreshCw, ArrowRight, Lock, ShieldCheck, XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getStoredKey } from "@/lib/auth";
@@ -537,6 +537,69 @@ function CredentialsStatusPanel() {
   );
 }
 
+function TestConnectionPanel({ liveReady }: { liveReady: boolean }) {
+  const testCreds = useTestCredentials();
+  const result = testCreds.data;
+
+  const handleTest = () => {
+    testCreds.reset();
+    testCreds.mutate();
+  };
+
+  return (
+    <div className="pt-3 border-t border-border/40 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+          Connection Test
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleTest}
+          disabled={testCreds.isPending || !liveReady}
+          className="font-mono text-[10px] tracking-widest rounded-none h-8 border-primary/30 text-primary hover:bg-primary/10 disabled:opacity-40"
+          data-testid="button-test-credentials"
+        >
+          {testCreds.isPending
+            ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />TESTING…</>
+            : <><ShieldCheck className="w-3 h-3 mr-1.5" />TEST CONNECTION</>
+          }
+        </Button>
+      </div>
+      {!liveReady && !result && (
+        <div className="font-mono text-[9px] text-muted-foreground/40">
+          Configure L1 + L2 credentials above before testing.
+        </div>
+      )}
+      {result && (
+        result.ok ? (
+          <div className="flex items-center gap-2 font-mono text-[10px] text-primary border border-primary/25 bg-primary/5 px-3 py-2">
+            <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+            Connection successful — credentials are valid.
+          </div>
+        ) : (
+          <div className="space-y-1 font-mono text-[10px] text-red-400 border border-red-400/20 bg-red-400/5 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <XCircle className="w-3.5 h-3.5 flex-shrink-0" />
+              Connection failed.
+            </div>
+            {result.error && (
+              <div className="text-[9px] text-red-400/70 pl-5 break-all">{result.error}</div>
+            )}
+          </div>
+        )
+      )}
+      {testCreds.isError && (
+        <div className="flex items-center gap-2 font-mono text-[10px] text-red-400 border border-red-400/20 bg-red-400/5 px-3 py-2">
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+          Could not reach server.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -749,6 +812,7 @@ export default function Settings() {
                 ))}
               </div>
             </details>
+            <TestConnectionPanel liveReady={liveReady} />
           </SectionCard>
 
           <SectionCard title="Telegram Alerts" subtitle="Daily P&L reports and real-time trade notifications"

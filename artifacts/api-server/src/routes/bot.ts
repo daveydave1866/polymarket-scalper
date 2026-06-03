@@ -10,11 +10,12 @@ import {
   UpdateBotConfigResponse,
   SyncMarketsResponse,
   GetOpportunitiesResponse,
+  TestCredentialsResponse,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
 import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop, lastCycleAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
 import { sendDailyReport, notifyBotEvent } from "../lib/telegram.js";
-import { getCredentialsStatus } from "../lib/credentials.js";
+import { getCredentialsStatus, resolvePolymarketCredentials } from "../lib/credentials.js";
 import { GetCredentialsStatusResponse } from "@workspace/api-zod";
 import { ethers } from "ethers";
 
@@ -314,6 +315,37 @@ router.get("/bot/credentials-status", async (_req, res): Promise<void> => {
   } catch (err) {
     logger.error({ err }, "GET /bot/credentials-status failed");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/bot/test-credentials", async (_req, res): Promise<void> => {
+  try {
+    const creds = await resolvePolymarketCredentials();
+    if (!creds) {
+      res.json(TestCredentialsResponse.parse({ ok: false, error: "No Polymarket credentials configured." }));
+      return;
+    }
+
+    let pk = creds.privateKey.trim();
+    if (!pk.startsWith("0x")) pk = `0x${pk}`;
+
+    const { ClobClient } = await import("@polymarket/clob-client");
+    const wallet = new ethers.Wallet(pk);
+    const client = new ClobClient(
+      "https://clob.polymarket.com",
+      137,
+      wallet as never,
+      { key: creds.apiKey, secret: creds.apiSecret, passphrase: creds.apiPassphrase }
+    );
+
+    await client.getApiKeys();
+
+    logger.info({ address: wallet.address }, "Credential validation succeeded");
+    res.json(TestCredentialsResponse.parse({ ok: true }));
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn({ err: message }, "Credential validation failed");
+    res.json(TestCredentialsResponse.parse({ ok: false, error: message }));
   }
 });
 

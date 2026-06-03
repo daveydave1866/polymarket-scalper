@@ -9,6 +9,7 @@ import type {
   SyncMarketsResponseType,
   GetOpportunitiesResponseType,
   GetCredentialsStatusResponseType,
+  TestCredentialsResponseType,
 } from "@workspace/api-zod";
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
@@ -159,5 +160,11 @@ export function useUpdateBotConfig() {
 export function useSendReport() {
   return useMutation<{ ok: boolean }, Error>({
     mutationFn: () => apiPost<{ ok: boolean }>("/bot/send-report"),
+  });
+}
+
+export function useTestCredentials() {
+  return useMutation<TestCredentialsResponseType, Error>({
+    mutationFn: () => apiPost<TestCredentialsResponseType>("/bot/test-credentials"),
   });
 }

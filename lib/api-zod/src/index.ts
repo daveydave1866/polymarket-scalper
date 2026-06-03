@@ -93,6 +93,14 @@ export const GetOpportunitiesResponse = z.object({
 });
 export type GetOpportunitiesResponseType = z.infer<typeof GetOpportunitiesResponse>;
 
+// ── Test credentials ──────────────────────────────────────────────────────────
+
+export const TestCredentialsResponse = z.object({
+  ok: z.boolean(),
+  error: z.string().optional(),
+});
+export type TestCredentialsResponseType = z.infer<typeof TestCredentialsResponse>;
+
 // ── Credentials status ────────────────────────────────────────────────────────
 
 const CredentialGroupSchema = z.object({
