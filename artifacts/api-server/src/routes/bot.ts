@@ -440,13 +440,18 @@ router.post("/bot/verify-l1-key", async (req, res): Promise<void> => {
 });
 
 router.post("/bot/generate-l2-keys", async (req, res): Promise<void> => {
-  const { privateKey } = req.body as { privateKey?: string };
-  if (!privateKey) {
-    res.status(400).json({ error: "privateKey is required" });
-    return;
-  }
+  const { privateKey: bodyKey } = req.body as { privateKey?: string };
   try {
-    let pk = privateKey.trim();
+    let pk = bodyKey?.trim() ?? "";
+    if (!pk) {
+      const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+      const stored = process.env.POLYMARKET_PRIVATE_KEY ?? config?.polymarketPrivateKey ?? "";
+      if (!stored || stored === "••••••••") {
+        res.status(400).json({ ok: false, error: "No L1 private key found. Please save your L1 wallet key first." });
+        return;
+      }
+      pk = stored;
+    }
     if (!pk.startsWith("0x")) pk = `0x${pk}`;
     const { ClobClient } = await import("@polymarket/clob-client");
     const wallet = new ethers.Wallet(pk);

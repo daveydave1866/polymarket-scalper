@@ -278,18 +278,15 @@ function L1KeyWizard({ isSet, onSave }: { isSet: boolean; onSave: (privateKey: s
   );
 }
 
-function L2KeyGenerator({ isSet, onSave }: { isSet: boolean; onSave: (key: string, secret: string, passphrase: string) => void }) {
-  const [pk, setPk] = useState("");
-  const [showPk, setShowPk] = useState(false);
+function L2KeyGenerator({ isSet, hasL1, onSave }: { isSet: boolean; hasL1: boolean; onSave: (key: string, secret: string, passphrase: string) => void }) {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ address: string; apiKey: string; apiSecret: string; apiPassphrase: string } | null>(null);
   const [error, setError] = useState("");
 
   const handleGenerate = async () => {
-    if (!pk.trim()) { setError("Enter your L1 private key."); return; }
     setGenerating(true); setError(""); setResult(null);
     try {
-      const data = await apiPost("/bot/generate-l2-keys", { privateKey: pk.trim() });
+      const data = await apiPost("/bot/generate-l2-keys", {});
       if (data.ok) setResult(data);
       else setError(data.error ?? "Generation failed.");
     } catch { setError("Could not reach server."); }
@@ -299,21 +296,8 @@ function L2KeyGenerator({ isSet, onSave }: { isSet: boolean; onSave: (key: strin
   return (
     <div className="space-y-4">
       <div className="font-mono text-[10px] text-muted-foreground/60 leading-relaxed">
-        L2 credentials are <span className="text-foreground">generated from your L1 wallet key</span> — required for order placement.
-      </div>
-      <div className="relative">
-        <Input
-          type={showPk ? "text" : "password"}
-          placeholder="0xabc123… (your wallet private key)"
-          value={pk}
-          onChange={e => { setPk(e.target.value); setResult(null); setError(""); }}
-          className="font-mono text-xs rounded-none bg-background border-border h-9 focus:border-primary/50 pr-9 tracking-wide"
-          data-testid="input-l2-pk"
-        />
-        <button type="button" tabIndex={-1} onClick={() => setShowPk(v => !v)}
-          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-muted-foreground">
-          {showPk ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-        </button>
+        L2 credentials are <span className="text-foreground">derived from your saved L1 wallet key</span> — required for order placement.
+        {!hasL1 && <span className="text-amber-400"> Save your L1 key first.</span>}
       </div>
       {error && (
         <div className="flex items-start gap-2 font-mono text-[10px] text-red-400 border border-red-400/20 bg-red-400/5 px-3 py-2">
@@ -321,7 +305,7 @@ function L2KeyGenerator({ isSet, onSave }: { isSet: boolean; onSave: (key: strin
         </div>
       )}
       <Button type="button" variant="outline" size="sm" onClick={handleGenerate}
-        disabled={generating || !pk.trim()}
+        disabled={generating || !hasL1}
         className="w-full font-mono text-[10px] tracking-widest rounded-none h-9 border-primary/30 text-primary hover:bg-primary/10"
         data-testid="button-generate-l2">
         {generating
@@ -819,7 +803,7 @@ export default function Settings() {
               <StatusPill set={!!config?.polymarketApiSecret}     label="Secret"     />
               <StatusPill set={!!config?.polymarketApiPassphrase} label="Passphrase" />
             </div>
-            <L2KeyGenerator isSet={hasL2} onSave={saveL2Keys} />
+            <L2KeyGenerator isSet={hasL2} hasL1={hasL1} onSave={saveL2Keys} />
             <details className="group">
               <summary className="font-mono text-[10px] text-muted-foreground/50 hover:text-muted-foreground cursor-pointer list-none flex items-center gap-1.5 select-none">
                 <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
