@@ -97,14 +97,37 @@ export async function notifySignal(
   }
 }
 
-export async function notifyBotEvent(event: "started" | "stopped", mode?: string) {
+function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+export async function notifyBotEvent(
+  event: "started" | "stopped",
+  mode?: string,
+  uptimeSeconds?: number,
+  tradeCount?: number
+) {
   const creds = await resolveTelegramCredentials();
   if (!creds) return;
 
-  const msg =
-    event === "started"
-      ? `🟢 *Bot started* (\`${mode ?? "unknown"}\` mode)`
-      : `⏹ *Bot stopped*`;
+  let msg: string;
+  if (event === "started") {
+    msg = `🟢 *Bot started* (\`${mode ?? "unknown"}\` mode)`;
+  } else {
+    const parts = [`⏹ *Bot stopped*`];
+    if (uptimeSeconds !== undefined) {
+      parts.push(`Uptime: \`${formatUptime(uptimeSeconds)}\``);
+    }
+    if (tradeCount !== undefined) {
+      parts.push(`Trades this session: \`${tradeCount}\``);
+    }
+    msg = parts.join(" | ");
+  }
 
   try {
     await sendMessage(creds.botToken, creds.chatId, msg);

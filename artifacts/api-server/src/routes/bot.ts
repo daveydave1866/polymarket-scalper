@@ -137,6 +137,16 @@ router.post("/bot/start", async (req, res): Promise<void> => {
 
 router.post("/bot/stop", async (_req, res): Promise<void> => {
   try {
+    const [configBefore] = await db
+      .select()
+      .from(botConfigTable)
+      .where(eq(botConfigTable.id, "singleton"));
+
+    const startedAt = configBefore?.startedAt ? new Date(configBefore.startedAt) : null;
+    const uptimeSeconds = startedAt
+      ? Math.floor((Date.now() - startedAt.getTime()) / 1000)
+      : undefined;
+
     await db
       .update(botConfigTable)
       .set({ running: false, startedAt: null })
@@ -144,7 +154,13 @@ router.post("/bot/stop", async (_req, res): Promise<void> => {
 
     stopTradingLoop();
     logger.info("Bot stopped");
-    notifyBotEvent("stopped").catch(() => {});
+
+    const allPositions = await db.select().from(positionsTable);
+    const sessionTrades = startedAt
+      ? allPositions.filter((p) => p.openedAt && new Date(p.openedAt) >= startedAt).length
+      : allPositions.length;
+
+    notifyBotEvent("stopped", undefined, uptimeSeconds, sessionTrades).catch(() => {});
 
     const signals = await db.select().from(signalsTable);
     const positions = await db.select().from(positionsTable);
