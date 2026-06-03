@@ -210,6 +210,7 @@ router.get("/bot/opportunities", async (_req, res): Promise<void> => {
             : m.conditionId
             ? `https://polymarket.com/event/${m.conditionId}`
             : undefined,
+          skipReason: m.skipReason ?? undefined,
         };
       })
       .sort((a, b) => b.opportunityScore - a.opportunityScore)

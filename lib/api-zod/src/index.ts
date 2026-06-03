@@ -92,6 +92,7 @@ export const OpportunitySchema = z.object({
   opportunityScore: z.number(),
   priceSkew: z.number(),
   polymarketUrl: z.string().optional(),
+  skipReason: z.string().optional(),
 });
 export type OpportunityType = z.infer<typeof OpportunitySchema>;
 

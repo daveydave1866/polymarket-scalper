@@ -43,6 +43,7 @@ export const marketsTable = pgTable("markets", {
   clobTokenIds: text("clob_token_ids"),
   isTracked: boolean("is_tracked").notNull().default(true),
   lastSyncAt: timestamp("last_sync_at").defaultNow(),
+  skipReason: text("skip_reason"),
 });
 
 export const signalsTable = pgTable("signals", {

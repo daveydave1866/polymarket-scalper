@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useGetOpportunities, useSyncMarkets } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, ExternalLink, TrendingUp, Loader2, Search } from "lucide-react";
+import { RefreshCw, ExternalLink, TrendingUp, Loader2, Search, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { OpportunityType } from "@workspace/api-zod";
 
@@ -51,6 +51,15 @@ function OpportunityRow({ opp, rank }: { opp: OpportunityType; rank: number }) {
             <span className={cn("font-mono text-[9px] border px-1.5 py-0.5 uppercase tracking-wider", catColor)}>
               {opp.category}
             </span>
+            {opp.skipReason && (
+              <span
+                title={opp.skipReason}
+                className="inline-flex items-center gap-1 font-mono text-[9px] border px-1.5 py-0.5 uppercase tracking-wider text-muted-foreground/50 border-muted-foreground/20 bg-muted/10 cursor-default"
+              >
+                <AlertCircle className="w-2.5 h-2.5" />
+                SKIPPED
+              </span>
+            )}
             {opp.polymarketUrl && (
               <a
                 href={opp.polymarketUrl}

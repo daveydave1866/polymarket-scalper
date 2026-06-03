@@ -182,6 +182,7 @@ async function generateSignals() {
         { marketId: market.id, yesPrice: market.yesPrice, noPrice: market.noPrice, priceMin, priceMax, skip: "price_out_of_range" },
         `Signal skipped: one or both prices outside tradeable range [${priceMin}, ${priceMax}]`
       );
+      await db.update(marketsTable).set({ skipReason: "Price out of range" }).where(eq(marketsTable.id, market.id));
       continue;
     }
 
@@ -193,6 +194,7 @@ async function generateSignals() {
           { marketId: market.id, endDate: market.endDate, skip: "unparseable_end_date" },
           "Signal skipped: endDate could not be parsed"
         );
+        await db.update(marketsTable).set({ skipReason: "Invalid end date" }).where(eq(marketsTable.id, market.id));
         continue;
       }
       const hoursLeft = (endsAt - Date.now()) / (1000 * 60 * 60);
@@ -201,8 +203,14 @@ async function generateSignals() {
           { marketId: market.id, endDate: market.endDate, hoursLeft: hoursLeft.toFixed(1), minTtrHours, skip: "expiring_soon" },
           `Signal skipped: market expires within ${minTtrHours} hours`
         );
+        await db.update(marketsTable).set({ skipReason: "Expiring soon" }).where(eq(marketsTable.id, market.id));
         continue;
       }
+    }
+
+    // Market passed all filters — clear any previously recorded skip reason
+    if (market.skipReason) {
+      await db.update(marketsTable).set({ skipReason: null }).where(eq(marketsTable.id, market.id));
     }
 
     const priceSkew = Math.abs(market.yesPrice - 0.5);
