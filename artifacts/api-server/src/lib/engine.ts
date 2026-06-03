@@ -158,6 +158,10 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
   return { synced, total: markets.length, lastSyncAt: lastDiscoveryAt.toISOString() };
 }
 
+const PRICE_MIN = 0.05;
+const PRICE_MAX = 0.95;
+const MIN_TTR_HOURS = 24;
+
 async function generateSignals() {
   const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
   if (!config) return;
@@ -165,6 +169,38 @@ async function generateSignals() {
   const markets = await db.select().from(marketsTable).where(eq(marketsTable.isTracked, true));
 
   for (const market of markets) {
+    // Skip near-settled markets: both outcome prices must be within the tradeable range
+    if (
+      market.yesPrice < PRICE_MIN || market.yesPrice > PRICE_MAX ||
+      market.noPrice < PRICE_MIN || market.noPrice > PRICE_MAX
+    ) {
+      logger.debug(
+        { marketId: market.id, yesPrice: market.yesPrice, noPrice: market.noPrice, skip: "price_out_of_range" },
+        "Signal skipped: one or both prices outside tradeable range [0.05, 0.95]"
+      );
+      continue;
+    }
+
+    // Skip markets expiring within 24 hours
+    if (market.endDate) {
+      const endsAt = new Date(market.endDate).getTime();
+      if (!isFinite(endsAt)) {
+        logger.debug(
+          { marketId: market.id, endDate: market.endDate, skip: "unparseable_end_date" },
+          "Signal skipped: endDate could not be parsed"
+        );
+        continue;
+      }
+      const hoursLeft = (endsAt - Date.now()) / (1000 * 60 * 60);
+      if (hoursLeft < MIN_TTR_HOURS) {
+        logger.debug(
+          { marketId: market.id, endDate: market.endDate, hoursLeft: hoursLeft.toFixed(1), skip: "expiring_soon" },
+          "Signal skipped: market expires within 24 hours"
+        );
+        continue;
+      }
+    }
+
     const priceSkew = Math.abs(market.yesPrice - 0.5);
     if (priceSkew > 0.02 && market.liquidity > 1000) {
       const side = market.yesPrice > 0.5 ? "no" : "yes";
