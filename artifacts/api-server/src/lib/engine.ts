@@ -1,4 +1,4 @@
-import { db, marketsTable, signalsTable, botConfigTable, positionsTable } from "@workspace/db";
+import { db, marketsTable, signalsTable, botConfigTable, positionsTable, balanceSnapshotsTable } from "@workspace/db";
 import { eq, gte, desc, and, inArray, notInArray } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { randomUUID } from "crypto";
@@ -847,6 +847,30 @@ async function maybeSendDailyReport(): Promise<void> {
   }
 }
 
+const BALANCE_SNAPSHOT_LIMIT = 100;
+
+async function recordBalanceSnapshot(): Promise<void> {
+  try {
+    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+    if (!config || config.mode !== "paper") return;
+
+    const balance = config.paperBalance ?? 1000;
+    await db.insert(balanceSnapshotsTable).values({ id: randomUUID(), balance, recordedAt: new Date() });
+
+    const allSnapshots = await db
+      .select({ id: balanceSnapshotsTable.id })
+      .from(balanceSnapshotsTable)
+      .orderBy(desc(balanceSnapshotsTable.recordedAt));
+
+    if (allSnapshots.length > BALANCE_SNAPSHOT_LIMIT) {
+      const toDelete = allSnapshots.slice(BALANCE_SNAPSHOT_LIMIT).map((s) => s.id);
+      await db.delete(balanceSnapshotsTable).where(inArray(balanceSnapshotsTable.id, toDelete));
+    }
+  } catch (err) {
+    logger.error({ err }, "Failed to record balance snapshot");
+  }
+}
+
 async function runTradingCycle(): Promise<void> {
   try {
     lastCycleAt = new Date();
@@ -854,6 +878,7 @@ async function runTradingCycle(): Promise<void> {
     await runDiscovery();
     await executeTrades();
     await monitorPositions();
+    await recordBalanceSnapshot();
     await maybeSendDailyReport();
     logger.info("Trading cycle complete");
   } catch (err) {

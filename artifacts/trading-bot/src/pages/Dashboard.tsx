@@ -6,6 +6,7 @@ import {
   useStartBot,
   useStopBot,
   useSyncMarkets,
+  useGetBalanceHistory,
   getGetBotStatusQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -16,6 +17,7 @@ import {
   Clock, Radio, BarChart2, Loader2, AlertTriangle, Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AreaChart, Area, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 
 function StatCard({
   label, value, sub, icon: Icon, accent,
@@ -37,6 +39,88 @@ function StatCard({
         <div className="font-mono text-2xl font-bold tabular-nums">{value}</div>
         {sub && <div className="font-mono text-[10px] text-muted-foreground/50 mt-0.5">{sub}</div>}
       </div>
+    </div>
+  );
+}
+
+function BalanceSparkline({ snapshots }: { snapshots: Array<{ balance: number; recordedAt: string }> }) {
+  if (snapshots.length < 2) {
+    return (
+      <div className="h-12 flex items-center justify-center font-mono text-[9px] uppercase tracking-widest text-muted-foreground/30">
+        Collecting data…
+      </div>
+    );
+  }
+
+  const min = Math.min(...snapshots.map((s) => s.balance));
+  const max = Math.max(...snapshots.map((s) => s.balance));
+  const isUp = snapshots[snapshots.length - 1].balance >= snapshots[0].balance;
+
+  const color = isUp ? "hsl(142 76% 48%)" : "hsl(0 72% 51%)";
+  const fillColor = isUp ? "hsl(142 76% 48% / 0.15)" : "hsl(0 72% 51% / 0.15)";
+
+  return (
+    <ResponsiveContainer width="100%" height={48}>
+      <AreaChart data={snapshots} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+        <defs>
+          <linearGradient id="balanceGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.2} />
+            <stop offset="95%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <YAxis hide domain={[min * 0.995, max * 1.005]} />
+        <Area
+          type="monotone"
+          dataKey="balance"
+          stroke={color}
+          strokeWidth={1.5}
+          fill="url(#balanceGrad)"
+          dot={false}
+          activeDot={{ r: 2, fill: color }}
+        />
+        <Tooltip
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            const snap = payload[0].payload as { balance: number; recordedAt: string };
+            return (
+              <div className="bg-card border border-border px-2 py-1 font-mono text-[9px] text-muted-foreground">
+                ${snap.balance.toFixed(2)}
+              </div>
+            );
+          }}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+function PaperBalanceCard({
+  paperBalance,
+  paperStarting,
+  snapshots,
+}: {
+  paperBalance: number;
+  paperStarting: number;
+  snapshots: Array<{ balance: number; recordedAt: string }>;
+}) {
+  const paperPnl = paperBalance - paperStarting;
+  const paperPnlSign = paperPnl >= 0 ? "+" : "";
+
+  return (
+    <div className="border border-border bg-card p-4 space-y-3 hover:border-primary/20 transition-colors">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Paper Balance</span>
+        <div className="p-1.5 border border-sky-400/30 bg-sky-400/8 text-sky-400">
+          <Wallet className="w-3.5 h-3.5" />
+        </div>
+      </div>
+      <div>
+        <div className="font-mono text-2xl font-bold tabular-nums">${paperBalance.toFixed(2)}</div>
+        <div className="font-mono text-[10px] text-muted-foreground/50 mt-0.5">
+          Start ${paperStarting.toFixed(2)} · P&amp;L {paperPnlSign}${paperPnl.toFixed(2)}
+        </div>
+      </div>
+      <BalanceSparkline snapshots={snapshots} />
     </div>
   );
 }
@@ -80,6 +164,7 @@ export default function Dashboard() {
   const { data: status, isLoading } = useGetBotStatus({ query: { refetchInterval: 3000 } });
   const { data: config } = useGetBotConfig();
   const { data: credStatus, isLoading: credLoading } = useGetCredentialsStatus();
+  const { data: balanceHistory } = useGetBalanceHistory({ query: { refetchInterval: 15000 } });
   const startBot = useStartBot();
   const stopBot = useStopBot();
   const syncMarkets = useSyncMarkets();
@@ -147,8 +232,8 @@ export default function Dashboard() {
   const isPaper = status?.mode === "paper" || (!status?.running && status?.mode !== "live");
   const paperBalance = status?.paperBalance ?? 1000;
   const paperStarting = status?.paperStartingBalance ?? 1000;
-  const paperPnl = paperBalance - paperStarting;
-  const paperPnlSign = paperPnl >= 0 ? "+" : "";
+
+  const snapshots = balanceHistory?.snapshots ?? [];
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -319,12 +404,10 @@ export default function Dashboard() {
           accent={status?.running ? "border-primary/30 bg-primary/8 text-primary" : undefined}
         />
         {isPaper && (
-          <StatCard
-            label="Paper Balance"
-            value={`$${paperBalance.toFixed(2)}`}
-            sub={`Start $${paperStarting.toFixed(2)} · P&L ${paperPnlSign}$${paperPnl.toFixed(2)}`}
-            icon={Wallet}
-            accent="border-sky-400/30 bg-sky-400/8 text-sky-400"
+          <PaperBalanceCard
+            paperBalance={paperBalance}
+            paperStarting={paperStarting}
+            snapshots={snapshots}
           />
         )}
         <StatCard

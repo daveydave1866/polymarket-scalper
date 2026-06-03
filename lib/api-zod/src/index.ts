@@ -127,6 +127,19 @@ export type PositionType = z.infer<typeof PositionSchema>;
 export const GetPositionsResponse = z.array(PositionSchema);
 export type GetPositionsResponseType = z.infer<typeof GetPositionsResponse>;
 
+// ── Balance history ───────────────────────────────────────────────────────────
+
+export const BalanceSnapshotSchema = z.object({
+  balance: z.number(),
+  recordedAt: z.string(),
+});
+export type BalanceSnapshotType = z.infer<typeof BalanceSnapshotSchema>;
+
+export const GetBalanceHistoryResponse = z.object({
+  snapshots: z.array(BalanceSnapshotSchema),
+});
+export type GetBalanceHistoryResponseType = z.infer<typeof GetBalanceHistoryResponse>;
+
 // ── Test credentials ──────────────────────────────────────────────────────────
 
 export const TestCredentialsResponse = z.object({

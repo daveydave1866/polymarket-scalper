@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, desc } from "drizzle-orm";
-import { db, botConfigTable, signalsTable, positionsTable, marketsTable } from "@workspace/db";
+import { db, botConfigTable, signalsTable, positionsTable, marketsTable, balanceSnapshotsTable } from "@workspace/db";
 import {
   GetBotStatusResponse,
   StartBotBody,
@@ -12,6 +12,7 @@ import {
   SyncMarketsResponse,
   GetOpportunitiesResponse,
   TestCredentialsResponse,
+  GetBalanceHistoryResponse,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
 import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop, lastCycleAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
@@ -367,6 +368,25 @@ router.post("/bot/test-credentials", async (_req, res): Promise<void> => {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn({ err: message }, "Credential validation failed");
     res.json(TestCredentialsResponse.parse({ ok: false, error: message }));
+  }
+});
+
+router.get("/bot/balance-history", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select()
+      .from(balanceSnapshotsTable)
+      .orderBy(desc(balanceSnapshotsTable.recordedAt))
+      .limit(100);
+
+    const snapshots = rows
+      .reverse()
+      .map((r) => ({ balance: r.balance, recordedAt: r.recordedAt.toISOString() }));
+
+    res.json(GetBalanceHistoryResponse.parse({ snapshots }));
+  } catch (err) {
+    logger.error({ err }, "GET /bot/balance-history failed");
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

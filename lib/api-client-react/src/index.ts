@@ -11,6 +11,7 @@ import type {
   GetOpportunitiesResponseType,
   GetCredentialsStatusResponseType,
   TestCredentialsResponseType,
+  GetBalanceHistoryResponseType,
 } from "@workspace/api-zod";
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
@@ -82,6 +83,10 @@ export function getGetOpportunitiesQueryKey() {
 
 export function getGetCredentialsStatusQueryKey() {
   return ["bot", "credentials-status"] as const;
+}
+
+export function getGetBalanceHistoryQueryKey() {
+  return ["bot", "balance-history"] as const;
 }
 
 // ── Queries ───────────────────────────────────────────────────────────────────
@@ -167,5 +172,14 @@ export function useSendReport() {
 export function useTestCredentials() {
   return useMutation<TestCredentialsResponseType, Error>({
     mutationFn: () => apiPost<TestCredentialsResponseType>("/bot/test-credentials"),
+  });
+}
+
+export function useGetBalanceHistory(options?: { query?: { refetchInterval?: number; enabled?: boolean } }) {
+  return useQuery<GetBalanceHistoryResponseType>({
+    queryKey: getGetBalanceHistoryQueryKey(),
+    queryFn: () => apiFetch<GetBalanceHistoryResponseType>("/bot/balance-history"),
+    refetchInterval: options?.query?.refetchInterval ?? 30000,
+    enabled: options?.query?.enabled ?? true,
   });
 }

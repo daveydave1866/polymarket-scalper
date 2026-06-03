@@ -70,3 +70,9 @@ export const positionsTable = pgTable("positions", {
   closedAt: timestamp("closed_at"),
   closeOrderPlacedAt: timestamp("close_order_placed_at"),
 });
+
+export const balanceSnapshotsTable = pgTable("balance_snapshots", {
+  id: text("id").primaryKey(),
+  balance: real("balance").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+});
