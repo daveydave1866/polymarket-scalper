@@ -12,6 +12,9 @@ const BotStatusBase = z.object({
   lastTradeAt: z.string().optional(),
   feedsActive: z.number(),
   marketsTracked: z.number(),
+  paperBalance: z.number().optional(),
+  paperStartingBalance: z.number().optional(),
+  nextCycleAt: z.string().optional(),
 });
 
 // ── Bot status ────────────────────────────────────────────────────────────────

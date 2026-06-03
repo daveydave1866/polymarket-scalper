@@ -12,7 +12,7 @@ import {
   GetOpportunitiesResponse,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
-import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop } from "../lib/engine.js";
+import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop, lastCycleAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
 import { sendDailyReport } from "../lib/telegram.js";
 import { getCredentialsStatus } from "../lib/credentials.js";
 import { GetCredentialsStatusResponse } from "@workspace/api-zod";
@@ -57,6 +57,11 @@ router.get("/bot/status", async (_req, res): Promise<void> => {
         ? Math.floor((Date.now() - new Date(config.startedAt).getTime()) / 1000)
         : 0;
 
+    const nextCycleAt =
+      config.running && lastCycleAt
+        ? new Date(lastCycleAt.getTime() + CYCLE_INTERVAL_MS).toISOString()
+        : undefined;
+
     res.json(
       GetBotStatusResponse.parse({
         running: config.running,
@@ -68,6 +73,9 @@ router.get("/bot/status", async (_req, res): Promise<void> => {
         lastTradeAt: positions.length > 0 ? positions[positions.length - 1].openedAt?.toISOString() : undefined,
         feedsActive: config.running ? 3 : 0,
         marketsTracked: 8,
+        paperBalance: config.mode === "paper" ? (config.paperBalance ?? 1000) : undefined,
+        paperStartingBalance: config.mode === "paper" ? 1000 : undefined,
+        nextCycleAt,
       })
     );
   } catch (err) {

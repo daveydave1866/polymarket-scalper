@@ -590,7 +590,8 @@ export async function monitorPositions(): Promise<void> {
 }
 
 let tradingLoopTimer: ReturnType<typeof setInterval> | null = null;
-const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+export const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+export let lastCycleAt: Date | null = null;
 
 let lastDailyReportDate: string | null = null;
 
@@ -615,6 +616,7 @@ async function maybeSendDailyReport(): Promise<void> {
 
 async function runTradingCycle(): Promise<void> {
   try {
+    lastCycleAt = new Date();
     logger.info("Trading cycle start");
     await runDiscovery();
     await executeTrades();

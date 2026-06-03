@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useGetBotStatus,
   useStartBot,
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play, Square, RefreshCw, Activity, Zap, TrendingUp,
-  Clock, Radio, BarChart2, Loader2, AlertTriangle,
+  Clock, Radio, BarChart2, Loader2, AlertTriangle, Wallet,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -56,10 +56,24 @@ function formatRelative(iso?: string): string {
   return `${Math.floor(s / 3600)}h ago`;
 }
 
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "0:00";
+  const totalSecs = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSecs / 60);
+  const s = totalSecs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function Dashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const { data: status, isLoading } = useGetBotStatus({ query: { refetchInterval: 3000 } });
   const startBot = useStartBot();
@@ -112,6 +126,16 @@ export default function Dashboard() {
     status?.mode === "live"   ? "text-amber-400"
     : status?.mode === "paper" ? "text-sky-400"
     : "text-muted-foreground";
+
+  const nextCycleMs = status?.nextCycleAt
+    ? new Date(status.nextCycleAt).getTime() - now
+    : null;
+
+  const isPaper = status?.mode === "paper" || (!status?.running && status?.mode !== "live");
+  const paperBalance = status?.paperBalance ?? 1000;
+  const paperStarting = status?.paperStartingBalance ?? 1000;
+  const paperPnl = paperBalance - paperStarting;
+  const paperPnlSign = paperPnl >= 0 ? "+" : "";
 
   return (
     <div className="space-y-6 animate-fade-up">
@@ -240,6 +264,28 @@ export default function Dashboard() {
           value={status?.running ? "ACTIVE" : "IDLE"}
           sub={`Mode: ${(status?.mode ?? "—").toUpperCase()}`}
           icon={Activity}
+          accent={status?.running ? "border-primary/30 bg-primary/8 text-primary" : undefined}
+        />
+        {isPaper && (
+          <StatCard
+            label="Paper Balance"
+            value={`$${paperBalance.toFixed(2)}`}
+            sub={`Start $${paperStarting.toFixed(2)} · P&L ${paperPnlSign}$${paperPnl.toFixed(2)}`}
+            icon={Wallet}
+            accent="border-sky-400/30 bg-sky-400/8 text-sky-400"
+          />
+        )}
+        <StatCard
+          label="Next Cycle"
+          value={
+            status?.running && nextCycleMs !== null && nextCycleMs > 0
+              ? formatCountdown(nextCycleMs)
+              : status?.running
+              ? "Running…"
+              : "—"
+          }
+          sub={status?.running ? "5-min trading interval" : "Bot not running"}
+          icon={Clock}
           accent={status?.running ? "border-primary/30 bg-primary/8 text-primary" : undefined}
         />
       </div>
