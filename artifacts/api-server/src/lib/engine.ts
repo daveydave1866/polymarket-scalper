@@ -18,6 +18,8 @@ const TAKE_PROFIT_RATIO = 0.08;
 const STOP_LOSS_RATIO = 0.12;
 const MAX_POSITION_AGE_MS = 24 * 60 * 60 * 1000;
 
+const STALE_ORDER_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
 interface GammaMarket {
   id: string;
   question: string;
@@ -274,6 +276,10 @@ async function buildClobClient(): Promise<any | null> {
   }
 }
 
+function isOrderAlreadyGone(message: string): boolean {
+  return /not.?found|404|already.cancel|does.not.exist|unknown.order|no.such.order/i.test(message);
+}
+
 function resolveTokenId(market: MarketForOrdering, side: string): string | undefined {
   if (market.clobTokenIds) {
     try {
@@ -379,6 +385,27 @@ async function activatePendingPositions(): Promise<void> {
         } else if (cancelled) {
           await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
           logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
+        } else {
+          const ageMs = Date.now() - new Date(pos.openedAt).getTime();
+          if (ageMs > STALE_ORDER_TIMEOUT_MS) {
+            logger.warn({ positionId: pos.id, orderId: pos.orderId, ageMs }, "Pending entry order stale — attempting cancel");
+            let cancelConfirmed = false;
+            try {
+              await client.cancelOrder(pos.orderId);
+              cancelConfirmed = true;
+            } catch (cancelErr) {
+              const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+              if (isOrderAlreadyGone(errMsg)) {
+                logger.warn({ positionId: pos.id }, "Stale pending order already gone on exchange — voiding position");
+                cancelConfirmed = true;
+              } else {
+                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale pending order failed transiently — will retry next cycle");
+              }
+            }
+            if (cancelConfirmed) {
+              await db.update(positionsTable).set({ status: "cancelled" }).where(eq(positionsTable.id, pos.id));
+            }
+          }
         }
 
       } else if (pos.status === "closing") {
@@ -405,6 +432,31 @@ async function activatePendingPositions(): Promise<void> {
             .update(positionsTable)
             .set({ status: "open", closeOrderId: null })
             .where(eq(positionsTable.id, pos.id));
+        } else {
+          const placedAt = pos.closeOrderPlacedAt ?? pos.openedAt;
+          const ageMs = Date.now() - new Date(placedAt).getTime();
+          if (ageMs > STALE_ORDER_TIMEOUT_MS) {
+            logger.warn({ positionId: pos.id, closeOrderId: pos.closeOrderId, ageMs }, "Closing order stale — attempting cancel");
+            let cancelConfirmed = false;
+            try {
+              await client.cancelOrder(pos.closeOrderId);
+              cancelConfirmed = true;
+            } catch (cancelErr) {
+              const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+              if (isOrderAlreadyGone(errMsg)) {
+                logger.warn({ positionId: pos.id }, "Stale closing order already gone on exchange — resetting to open for retry");
+                cancelConfirmed = true;
+              } else {
+                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale closing order failed transiently — will retry next cycle");
+              }
+            }
+            if (cancelConfirmed) {
+              await db
+                .update(positionsTable)
+                .set({ status: "open", closeOrderId: null, closeOrderPlacedAt: null })
+                .where(eq(positionsTable.id, pos.id));
+            }
+          }
         }
       }
     } catch (err) {
@@ -614,7 +666,7 @@ export async function monitorPositions(): Promise<void> {
           logger.info({ positionId: pos.id, closeOrderId, reason }, "Live close order submitted — awaiting fill confirmation");
           await db
             .update(positionsTable)
-            .set({ currentPrice, pnl, status: "closing", closeOrderId })
+            .set({ currentPrice, pnl, status: "closing", closeOrderId, closeOrderPlacedAt: new Date() })
             .where(eq(positionsTable.id, pos.id));
         } else {
           await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));

@@ -66,4 +66,5 @@ export const positionsTable = pgTable("positions", {
   status: text("status").notNull().default("open"),
   openedAt: timestamp("opened_at").defaultNow().notNull(),
   closedAt: timestamp("closed_at"),
+  closeOrderPlacedAt: timestamp("close_order_placed_at"),
 });
