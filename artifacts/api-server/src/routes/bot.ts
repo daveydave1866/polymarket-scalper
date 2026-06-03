@@ -232,6 +232,8 @@ router.get("/bot/config", async (_req, res): Promise<void> => {
         dailyReportHour: config.dailyReportHour ?? 8,
         sportsApiKey: config.sportsApiKey ? "••••••••" : undefined,
         weatherApiKey: config.weatherApiKey ? "••••••••" : undefined,
+        notifyMinEdge: config.notifyMinEdge ?? 0.10,
+        notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
       })
     );
   } catch (err) {
@@ -295,6 +297,8 @@ router.put("/bot/config", async (req, res): Promise<void> => {
         dailyReportHour: updated.dailyReportHour ?? 8,
         sportsApiKey: updated.sportsApiKey ? "••••••••" : undefined,
         weatherApiKey: updated.weatherApiKey ? "••••••••" : undefined,
+        notifyMinEdge: updated.notifyMinEdge ?? 0.10,
+        notifyMaxPerCycle: updated.notifyMaxPerCycle ?? 5,
       })
     );
   } catch (err) {

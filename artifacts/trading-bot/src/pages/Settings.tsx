@@ -30,6 +30,8 @@ const configSchema = z.object({
   maxPositionSize: z.coerce.number().min(1),
   maxOpenPositions: z.coerce.number().min(1),
   signalWindowSeconds: z.coerce.number().min(1),
+  notifyMinEdge: z.coerce.number().min(0).max(1).optional(),
+  notifyMaxPerCycle: z.coerce.number().int().min(1).max(50).optional(),
   polymarketPrivateKey: z.string().optional(),
   polymarketApiKey: z.string().optional(),
   polymarketApiSecret: z.string().optional(),
@@ -546,6 +548,7 @@ export default function Settings() {
     defaultValues: {
       mode: "paper", minEdge: 0.05, maxPositionSize: 100,
       maxOpenPositions: 5, signalWindowSeconds: 300, dailyReportHour: 8,
+      notifyMinEdge: 0.10, notifyMaxPerCycle: 5,
     },
   });
 
@@ -563,6 +566,8 @@ export default function Settings() {
         maxPositionSize: config.maxPositionSize,
         maxOpenPositions: config.maxOpenPositions,
         signalWindowSeconds: config.signalWindowSeconds,
+        notifyMinEdge: config.notifyMinEdge ?? 0.10,
+        notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
         polymarketPrivateKey: "", polymarketApiKey: "", polymarketApiSecret: "",
         polymarketApiPassphrase: "", telegramBotToken: "",
         telegramChatId: config.telegramChatId ?? "",
@@ -675,10 +680,12 @@ export default function Settings() {
                 </FormItem>
               )} />
               {([
-                { name: "minEdge" as const, label: "Min Edge", desc: "0.05 = 5% required edge", step: "0.01" },
+                { name: "minEdge" as const, label: "Min Edge", desc: "0.05 = 5% required edge to trade", step: "0.01" },
                 { name: "maxPositionSize" as const, label: "Max Position $", desc: "Max USDC per position", step: "1" },
                 { name: "maxOpenPositions" as const, label: "Max Open Pos.", desc: "Hard cap on concurrent trades", step: "1" },
                 { name: "signalWindowSeconds" as const, label: "Signal Expiry (s)", desc: "Seconds before signal discarded", step: "1" },
+                { name: "notifyMinEdge" as const, label: "Notify Min Edge", desc: "Min edge to fire Telegram alert (e.g. 0.10)", step: "0.01" },
+                { name: "notifyMaxPerCycle" as const, label: "Max Alerts/Cycle", desc: "Cap on Telegram signal alerts per scan", step: "1" },
               ]).map(({ name, label, desc, step }) => (
                 <FormField key={name} control={form.control} name={name} render={({ field }) => (
                   <FormItem>

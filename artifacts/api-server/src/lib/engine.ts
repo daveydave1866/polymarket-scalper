@@ -168,6 +168,8 @@ async function generateSignals() {
 
   const markets = await db.select().from(marketsTable).where(eq(marketsTable.isTracked, true));
 
+  const pendingNotifications: Array<{ id: string; question: string; side: string; edge: number; confidence: number }> = [];
+
   for (const market of markets) {
     // Skip near-settled markets: both outcome prices must be within the tradeable range
     if (
@@ -208,17 +210,37 @@ async function generateSignals() {
 
       if (edge >= config.minEdge) {
         const confidence = Math.min(priceSkew * 4, 1);
+        const id = randomUUID();
         await db.insert(signalsTable).values({
-          id: randomUUID(),
+          id,
           marketId: market.id,
           side,
           confidence,
           edge,
           source: "price_skew",
         });
-        await notifySignal(market.question, side, edge, confidence).catch(() => {});
+        pendingNotifications.push({ id, question: market.question, side, edge, confidence });
       }
     }
+  }
+
+  const notifyMinEdge = config.notifyMinEdge ?? 0.10;
+  const notifyMaxPerCycle = config.notifyMaxPerCycle ?? 5;
+
+  const toNotify = pendingNotifications
+    .filter((s) => s.edge >= notifyMinEdge)
+    .sort((a, b) => b.edge - a.edge)
+    .slice(0, notifyMaxPerCycle);
+
+  for (const s of toNotify) {
+    await notifySignal(s.question, s.side, s.edge, s.confidence).catch(() => {});
+  }
+
+  if (pendingNotifications.length > 0) {
+    logger.info(
+      { total: pendingNotifications.length, notified: toNotify.length, notifyMinEdge, notifyMaxPerCycle },
+      "Signal generation complete — notifications sent for top signals above notify threshold",
+    );
   }
 }
 

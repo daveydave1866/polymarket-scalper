@@ -47,6 +47,8 @@ export const BotConfigSchema = z.object({
   dailyReportHour: z.number().int().min(0).max(23).optional(),
   sportsApiKey: z.string().optional(),
   weatherApiKey: z.string().optional(),
+  notifyMinEdge: z.number().min(0).max(1).optional(),
+  notifyMaxPerCycle: z.number().int().min(1).max(50).optional(),
 });
 
 export const GetBotConfigResponse = BotConfigSchema;

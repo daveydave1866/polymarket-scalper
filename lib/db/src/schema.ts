@@ -20,6 +20,8 @@ export const botConfigTable = pgTable("bot_config", {
   dailyReportHour: integer("daily_report_hour").default(8),
   sportsApiKey: text("sports_api_key"),
   weatherApiKey: text("weather_api_key"),
+  notifyMinEdge: real("notify_min_edge").notNull().default(0.10),
+  notifyMaxPerCycle: integer("notify_max_per_cycle").notNull().default(5),
 });
 
 export const marketsTable = pgTable("markets", {
