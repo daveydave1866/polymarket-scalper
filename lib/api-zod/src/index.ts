@@ -22,6 +22,11 @@ const BotStatusBase = z.object({
 export const GetBotStatusResponse = BotStatusBase;
 export type GetBotStatusResponseType = z.infer<typeof GetBotStatusResponse>;
 
+export const StartBotBody = z.object({
+  resetPaperBalance: z.boolean().optional(),
+});
+export type StartBotBodyType = z.infer<typeof StartBotBody>;
+
 export const StartBotResponse = BotStatusBase;
 export type StartBotResponseType = z.infer<typeof StartBotResponse>;
 

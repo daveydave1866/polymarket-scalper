@@ -3,6 +3,7 @@ import { eq, desc } from "drizzle-orm";
 import { db, botConfigTable, signalsTable, positionsTable, marketsTable } from "@workspace/db";
 import {
   GetBotStatusResponse,
+  StartBotBody,
   StartBotResponse,
   StopBotResponse,
   GetBotConfigResponse,
@@ -85,16 +86,31 @@ router.get("/bot/status", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/start", async (_req, res): Promise<void> => {
+router.post("/bot/start", async (req, res): Promise<void> => {
   try {
+    const parsed = StartBotBody.safeParse(req.body ?? {});
+    const resetPaperBalance = parsed.success ? (parsed.data.resetPaperBalance ?? false) : false;
+
     const now = new Date();
+    const updateFields: Partial<typeof botConfigTable.$inferInsert> = {
+      running: true,
+      startedAt: now.toISOString(),
+    };
+
+    if (resetPaperBalance) {
+      const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+      if (!cfg || cfg.mode === "paper") {
+        updateFields.paperBalance = 1000;
+      }
+    }
+
     await db
       .update(botConfigTable)
-      .set({ running: true, startedAt: now.toISOString() })
+      .set(updateFields)
       .where(eq(botConfigTable.id, "singleton"));
 
     startTradingLoop();
-    logger.info("Bot started");
+    logger.info({ resetPaperBalance }, "Bot started");
 
     const config = await getOrCreateConfig();
     notifyBotEvent("started", config.mode).catch(() => {});

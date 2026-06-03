@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   GetBotStatusResponseType,
+  StartBotBodyType,
   StartBotResponseType,
   StopBotResponseType,
   GetBotConfigResponseType,
@@ -123,8 +124,8 @@ export function useGetCredentialsStatus(options?: { query?: { enabled?: boolean 
 
 export function useStartBot() {
   const queryClient = useQueryClient();
-  return useMutation<StartBotResponseType, Error>({
-    mutationFn: () => apiPost<StartBotResponseType>("/bot/start"),
+  return useMutation<StartBotResponseType, Error, StartBotBodyType | undefined>({
+    mutationFn: (body) => apiPost<StartBotResponseType>("/bot/start", body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: getGetBotStatusQueryKey() });
     },

@@ -88,10 +88,15 @@ export default function Dashboard() {
   const polymarketReady = credStatus?.polymarket?.configured === true;
   const liveStartBlocked = isLiveMode && (credLoading || !polymarketReady);
 
-  const handleStart = () => {
-    startBot.mutate(undefined as never, {
+  const handleStart = (resetPaperBalance = false) => {
+    startBot.mutate(resetPaperBalance ? { resetPaperBalance: true } : undefined, {
       onSuccess: () => {
-        toast({ title: "Bot started", description: "Market monitoring active." });
+        toast({
+          title: "Bot started",
+          description: resetPaperBalance
+            ? "Paper balance reset to $1,000. Market monitoring active."
+            : "Market monitoring active.",
+        });
         queryClient.invalidateQueries({ queryKey: getGetBotStatusQueryKey() });
       },
       onError: () => toast({ variant: "destructive", title: "Error", description: "Failed to start bot." }),
@@ -186,20 +191,39 @@ export default function Dashboard() {
               STOP BOT
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={handleStart}
-              disabled={startBot.isPending || liveStartBlocked}
-              title={liveStartBlocked ? "Polymarket credentials required for live mode" : undefined}
-              className="font-mono text-[10px] tracking-widest rounded-none h-8"
-              data-testid="button-start-bot"
-            >
-              {startBot.isPending
-                ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                : <Play className="w-3 h-3 mr-1.5" />
-              }
-              START BOT
-            </Button>
+            <>
+              {!isLiveMode && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleStart(true)}
+                  disabled={startBot.isPending}
+                  title="Reset paper balance to $1,000 and start"
+                  className="font-mono text-[10px] tracking-widest rounded-none h-8 border-sky-500/40 text-sky-400 hover:border-sky-400/60 hover:bg-sky-400/8"
+                  data-testid="button-reset-start-bot"
+                >
+                  {startBot.isPending
+                    ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                    : <RefreshCw className="w-3 h-3 mr-1.5" />
+                  }
+                  RESET &amp; START
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => handleStart(false)}
+                disabled={startBot.isPending || liveStartBlocked}
+                title={liveStartBlocked ? "Polymarket credentials required for live mode" : undefined}
+                className="font-mono text-[10px] tracking-widest rounded-none h-8"
+                data-testid="button-start-bot"
+              >
+                {startBot.isPending
+                  ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  : <Play className="w-3 h-3 mr-1.5" />
+                }
+                START BOT
+              </Button>
+            </>
           )}
         </div>
       </div>
