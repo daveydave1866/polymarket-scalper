@@ -33,6 +33,9 @@ const configSchema = z.object({
   notifyMinEdge: z.coerce.number().min(0).max(1).optional(),
   notifyMaxPerCycle: z.coerce.number().int().min(1).max(50).optional(),
   partialFillThreshold: z.coerce.number().min(0).max(1).optional(),
+  priceMin: z.coerce.number().min(0).max(1).optional(),
+  priceMax: z.coerce.number().min(0).max(1).optional(),
+  minTtrHours: z.coerce.number().min(0).optional(),
   polymarketPrivateKey: z.string().optional(),
   polymarketApiKey: z.string().optional(),
   polymarketApiSecret: z.string().optional(),
@@ -625,6 +628,7 @@ export default function Settings() {
       mode: "paper", minEdge: 0.05, maxPositionSize: 100,
       maxOpenPositions: 5, signalWindowSeconds: 300, dailyReportHour: 8,
       notifyMinEdge: 0.10, notifyMaxPerCycle: 5, partialFillThreshold: 0.5,
+      priceMin: 0.05, priceMax: 0.95, minTtrHours: 24,
     },
   });
 
@@ -650,6 +654,9 @@ export default function Settings() {
         notifyMinEdge: config.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
         partialFillThreshold: config.partialFillThreshold ?? 0.5,
+        priceMin: config.priceMin ?? 0.05,
+        priceMax: config.priceMax ?? 0.95,
+        minTtrHours: config.minTtrHours ?? 24,
         polymarketPrivateKey:    config.polymarketPrivateKey    ? SENTINEL : "",
         polymarketApiKey:        config.polymarketApiKey        ? SENTINEL : "",
         polymarketApiSecret:     config.polymarketApiSecret     ? SENTINEL : "",
@@ -774,6 +781,9 @@ export default function Settings() {
                 { name: "notifyMinEdge" as const, label: "Notify Min Edge", desc: "Min edge to fire Telegram alert (e.g. 0.10)", step: "0.01" },
                 { name: "notifyMaxPerCycle" as const, label: "Max Alerts/Cycle", desc: "Cap on Telegram signal alerts per scan", step: "1" },
                 { name: "partialFillThreshold" as const, label: "Partial Fill Min %", desc: "Min fill ratio to activate position (e.g. 0.5 = 50%)", step: "0.05" },
+                { name: "priceMin" as const, label: "Price Filter Min", desc: "Skip markets with YES price below this (e.g. 0.05)", step: "0.01" },
+                { name: "priceMax" as const, label: "Price Filter Max", desc: "Skip markets with YES price above this (e.g. 0.95)", step: "0.01" },
+                { name: "minTtrHours" as const, label: "Min Time-to-Resolve (h)", desc: "Skip markets resolving sooner than this many hours (e.g. 24)", step: "1" },
               ]).map(({ name, label, desc, step }) => (
                 <FormField key={name} control={form.control} name={name} render={({ field }) => (
                   <FormItem>

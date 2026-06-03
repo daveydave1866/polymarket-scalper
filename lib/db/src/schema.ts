@@ -23,6 +23,9 @@ export const botConfigTable = pgTable("bot_config", {
   notifyMinEdge: real("notify_min_edge").notNull().default(0.10),
   notifyMaxPerCycle: integer("notify_max_per_cycle").notNull().default(5),
   partialFillThreshold: real("partial_fill_threshold").notNull().default(0.5),
+  priceMin: real("price_min").notNull().default(0.05),
+  priceMax: real("price_max").notNull().default(0.95),
+  minTtrHours: real("min_ttr_hours").notNull().default(24),
 });
 
 export const marketsTable = pgTable("markets", {

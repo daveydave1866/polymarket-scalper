@@ -55,6 +55,9 @@ export const BotConfigSchema = z.object({
   notifyMinEdge: z.number().min(0).max(1).optional(),
   notifyMaxPerCycle: z.number().int().min(1).max(50).optional(),
   partialFillThreshold: z.number().min(0).max(1).optional(),
+  priceMin: z.number().min(0).max(1).optional(),
+  priceMax: z.number().min(0).max(1).optional(),
+  minTtrHours: z.number().min(0).optional(),
 });
 
 export const GetBotConfigResponse = BotConfigSchema;

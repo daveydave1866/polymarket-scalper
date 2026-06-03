@@ -253,6 +253,9 @@ router.get("/bot/config", async (_req, res): Promise<void> => {
         notifyMinEdge: config.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: config.notifyMaxPerCycle ?? 5,
         partialFillThreshold: config.partialFillThreshold ?? 0.5,
+        priceMin: config.priceMin ?? 0.05,
+        priceMax: config.priceMax ?? 0.95,
+        minTtrHours: config.minTtrHours ?? 24,
       })
     );
   } catch (err) {
@@ -322,6 +325,9 @@ router.put("/bot/config", async (req, res): Promise<void> => {
         notifyMinEdge: updated.notifyMinEdge ?? 0.10,
         notifyMaxPerCycle: updated.notifyMaxPerCycle ?? 5,
         partialFillThreshold: updated.partialFillThreshold ?? 0.5,
+        priceMin: updated.priceMin ?? 0.05,
+        priceMax: updated.priceMax ?? 0.95,
+        minTtrHours: updated.minTtrHours ?? 24,
       })
     );
   } catch (err) {
