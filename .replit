@@ -41,3 +41,8 @@ externalPort = 80
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 120000
+
+[userenv]
+
+[userenv.shared]
+BOT_API_KEY = "bsk_bd5b59a556c78b9268ec5ec0aadb16008a5cacd564b9c40a"

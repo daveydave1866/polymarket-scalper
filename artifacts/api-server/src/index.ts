@@ -17,12 +17,36 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 app.use(pinoHttp({ logger }));
 app.use(express.json());
 
-app.use("/api", botRouter);
-app.use("/api", dataRouter);
-
 app.get("/health", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
+
+app.post("/api/auth/verify", (req, res) => {
+  const BOT_API_KEY = process.env.BOT_API_KEY;
+  if (!BOT_API_KEY) {
+    res.json({ ok: true });
+    return;
+  }
+  const auth = req.headers.authorization ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  res.json({ ok: token === BOT_API_KEY });
+});
+
+app.use("/api", (req, res, next) => {
+  const BOT_API_KEY = process.env.BOT_API_KEY;
+  if (!BOT_API_KEY) { next(); return; }
+  if (req.path === "/auth/verify") { next(); return; }
+  const auth = req.headers.authorization ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (token !== BOT_API_KEY) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+});
+
+app.use("/api", botRouter);
+app.use("/api", dataRouter);
 
 if (process.env.NODE_ENV === "production") {
   const staticDir = path.join(__dirname, "../../trading-bot/dist");
