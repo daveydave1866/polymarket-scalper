@@ -93,6 +93,33 @@ export const GetOpportunitiesResponse = z.object({
 });
 export type GetOpportunitiesResponseType = z.infer<typeof GetOpportunitiesResponse>;
 
+// ── Positions ─────────────────────────────────────────────────────────────────
+
+export const PositionStatusSchema = z.enum(["pending", "open", "closing", "closed", "cancelled"]);
+export type PositionStatus = z.infer<typeof PositionStatusSchema>;
+
+export const PositionSchema = z.object({
+  id: z.string(),
+  marketId: z.string(),
+  question: z.string().optional(),
+  signalId: z.string().nullable().optional(),
+  orderId: z.string().nullable().optional(),
+  closeOrderId: z.string().nullable().optional(),
+  closedPrice: z.number().nullable().optional(),
+  side: z.string(),
+  size: z.number(),
+  entryPrice: z.number(),
+  currentPrice: z.number().nullable().optional(),
+  pnl: z.number().nullable().optional(),
+  status: z.string(),
+  openedAt: z.string(),
+  closedAt: z.string().nullable().optional(),
+});
+export type PositionType = z.infer<typeof PositionSchema>;
+
+export const GetPositionsResponse = z.array(PositionSchema);
+export type GetPositionsResponseType = z.infer<typeof GetPositionsResponse>;
+
 // ── Test credentials ──────────────────────────────────────────────────────────
 
 export const TestCredentialsResponse = z.object({
