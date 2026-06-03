@@ -14,8 +14,8 @@ const POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com";
 const CLOB_HOST = "https://clob.polymarket.com";
 const CHAIN_ID = 137;
 
-const TAKE_PROFIT_RATIO = 0.08;
-const STOP_LOSS_RATIO = 0.12;
+const TAKE_PROFIT_RATIO = 0.06;
+const STOP_LOSS_RATIO = 0.04;
 const MAX_POSITION_AGE_MS = 24 * 60 * 60 * 1000;
 
 const STALE_ORDER_TIMEOUT_MS = 2 * 60 * 60 * 1000;
@@ -214,8 +214,8 @@ async function generateSignals() {
     }
 
     const priceSkew = Math.abs(market.yesPrice - 0.5);
-    if (priceSkew > 0.02 && market.liquidity > 1000) {
-      const side = market.yesPrice > 0.5 ? "no" : "yes";
+    if (priceSkew > 0.05 && market.liquidity > 5000) {
+      const side = market.yesPrice > 0.5 ? "yes" : "no";
       const edge = priceSkew * 2;
 
       if (edge >= config.minEdge) {
@@ -815,7 +815,7 @@ export async function monitorPositions(): Promise<void> {
       } else {
         await db
           .update(positionsTable)
-          .set({ currentPrice, pnl, status: "closed", closedAt: new Date() })
+          .set({ currentPrice, pnl, status: "closed", closedAt: new Date(), closedPrice: currentPrice })
           .where(eq(positionsTable.id, pos.id));
 
         const refund = pos.size + pnl;
