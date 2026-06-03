@@ -141,14 +141,16 @@ function StepBadge({ n, done, active }: { n: number; done?: boolean; active?: bo
 }
 
 function SectionCard({
-  title, subtitle, icon: Icon, accentColor, badge, badgeColor,
+  title, subtitle, icon: Icon, accentColor, badge, badgeColor, source,
   defaultOpen = true, children,
 }: {
   title: string; subtitle?: string; icon: React.ElementType;
   accentColor?: string; badge?: string; badgeColor?: string;
+  source?: CredSource;
   defaultOpen?: boolean; children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const showSource = source && source !== "none";
   return (
     <div className="border border-border bg-card overflow-hidden">
       <button
@@ -172,6 +174,7 @@ function SectionCard({
                 {badge}
               </span>
             )}
+            {showSource && <SourceBadge source={source} />}
           </div>
           {subtitle && (
             <p className="font-mono text-[10px] text-muted-foreground/60 mt-0.5">{subtitle}</p>
@@ -184,6 +187,12 @@ function SectionCard({
       </button>
       {open && (
         <div className="px-5 pb-6 pt-2 border-t border-border/40 space-y-5">
+          {source === "env" && (
+            <div className="flex items-center gap-2 font-mono text-[9px] text-sky-400/70 border border-sky-400/20 bg-sky-400/5 px-3 py-2">
+              <Lock className="w-3 h-3 flex-shrink-0" />
+              These credentials come from an environment variable and cannot be changed here — update them in Railway (or your deployment env) to modify.
+            </div>
+          )}
           {children}
         </div>
       )}
@@ -607,6 +616,7 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const { data: config, isLoading } = useGetBotConfig({ query: { queryKey: getGetBotConfigQueryKey() } });
   const updateConfig = useUpdateBotConfig();
+  const { data: credStatus } = useGetCredentialsStatus();
 
   const form = useForm<ConfigForm>({
     resolver: zodResolver(configSchema),
@@ -622,6 +632,11 @@ export default function Settings() {
   const hasL2  = !!(config?.polymarketApiKey && config?.polymarketApiSecret && config?.polymarketApiPassphrase);
   const hasTg  = !!(config?.telegramBotToken && config?.telegramChatId);
   const liveReady = hasL1 && hasL2;
+
+  const pmSource  = (credStatus?.polymarket?.source  ?? "none") as CredSource;
+  const tgSource  = (credStatus?.telegram?.source    ?? "none") as CredSource;
+  const saSource  = (credStatus?.sportsApi?.source   ?? "none") as CredSource;
+  const waSource  = (credStatus?.weatherApi?.source  ?? "none") as CredSource;
 
   useEffect(() => {
     if (config) {
@@ -776,14 +791,16 @@ export default function Settings() {
           <SectionCard title="Polymarket — L1 Wallet Key" subtitle="Your Polygon wallet private key for on-chain signing"
             icon={Wallet} accentColor="border-amber-400/30 bg-amber-400/8 text-amber-400"
             badge={hasL1 ? "SET" : "REQUIRED FOR LIVE"}
-            badgeColor={hasL1 ? "border-primary/30 text-primary bg-primary/8" : "border-amber-400/30 text-amber-400/80"}>
+            badgeColor={hasL1 ? "border-primary/30 text-primary bg-primary/8" : "border-amber-400/30 text-amber-400/80"}
+            source={pmSource}>
             <L1KeyWizard isSet={hasL1} onSave={saveL1Key} />
           </SectionCard>
 
           <SectionCard title="Polymarket — L2 API Credentials" subtitle="Generated from your L1 key — required for order placement"
             icon={Key} accentColor="border-primary/30 bg-primary/8 text-primary"
             badge={hasL2 ? "SET" : "REQUIRED FOR LIVE"}
-            badgeColor={hasL2 ? "border-primary/30 text-primary bg-primary/8" : "border-amber-400/30 text-amber-400/80"}>
+            badgeColor={hasL2 ? "border-primary/30 text-primary bg-primary/8" : "border-amber-400/30 text-amber-400/80"}
+            source={pmSource}>
             <div className="flex gap-2">
               <StatusPill set={!!config?.polymarketApiKey}        label="API Key"    />
               <StatusPill set={!!config?.polymarketApiSecret}     label="Secret"     />
@@ -832,6 +849,7 @@ export default function Settings() {
             icon={Send} accentColor="border-sky-400/30 bg-sky-400/8 text-sky-400"
             badge={hasTg ? "CONNECTED" : "OPTIONAL"}
             badgeColor={hasTg ? "border-primary/30 text-primary bg-primary/8" : "border-border text-muted-foreground/50"}
+            source={tgSource}
             defaultOpen={!hasTg}>
             <TelegramSetup hasBotToken={!!config?.telegramBotToken} hasChatId={!!config?.telegramChatId}
               control={form.control} form={form} />
@@ -840,14 +858,21 @@ export default function Settings() {
           <SectionCard title="Optional Data Feeds" subtitle="External APIs that improve signal quality" icon={Radio} defaultOpen={false}>
             <div className="grid gap-4">
               {([
-                { name: "sportsApiKey" as const,  label: "Sports — The Odds API",    desc: "Free at the-odds-api.com",   isSet: !!config?.sportsApiKey  },
-                { name: "weatherApiKey" as const, label: "Weather — OpenWeatherMap", desc: "Free at openweathermap.org", isSet: !!config?.weatherApiKey },
-              ]).map(({ name, label, desc, isSet }) => (
+                { name: "sportsApiKey" as const,  label: "Sports — The Odds API",    desc: "Free at the-odds-api.com",   isSet: !!config?.sportsApiKey,  source: saSource },
+                { name: "weatherApiKey" as const, label: "Weather — OpenWeatherMap", desc: "Free at openweathermap.org", isSet: !!config?.weatherApiKey, source: waSource },
+              ]).map(({ name, label, desc, isSet, source }) => (
                 <FormField key={name} control={form.control} name={name} render={({ field }) => (
                   <FormItem>
                     <FormLabel className="font-mono text-[10px] uppercase tracking-widest flex items-center gap-2">
                       {label} <StatusPill set={isSet} label={isSet ? "Set" : "Not set"} />
+                      {source !== "none" && <SourceBadge source={source} />}
                     </FormLabel>
+                    {source === "env" && (
+                      <p className="font-mono text-[9px] text-sky-400/70 flex items-center gap-1.5">
+                        <Lock className="w-2.5 h-2.5 flex-shrink-0" />
+                        Set via environment variable — update in Railway to change.
+                      </p>
+                    )}
                     <FormControl>
                       <RevealInput
                         value={field.value === SENTINEL ? "" : (field.value ?? "")}
