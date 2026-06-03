@@ -1,7 +1,16 @@
 import { pgTable, text, real, integer, boolean, timestamp } from "drizzle-orm/pg-core";
 
+export const usersTable = pgTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role").notNull().default("user"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const botConfigTable = pgTable("bot_config", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default(""),
   mode: text("mode").notNull().default("paper"),
   minEdge: real("min_edge").notNull().default(0.05),
   maxPositionSize: real("max_position_size").notNull().default(50),
@@ -48,6 +57,7 @@ export const marketsTable = pgTable("markets", {
 
 export const signalsTable = pgTable("signals", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default(""),
   marketId: text("market_id").notNull(),
   side: text("side").notNull(),
   confidence: real("confidence").notNull().default(0),
@@ -59,6 +69,7 @@ export const signalsTable = pgTable("signals", {
 
 export const positionsTable = pgTable("positions", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default(""),
   marketId: text("market_id").notNull(),
   signalId: text("signal_id"),
   orderId: text("order_id"),
@@ -78,6 +89,7 @@ export const positionsTable = pgTable("positions", {
 
 export const balanceSnapshotsTable = pgTable("balance_snapshots", {
   id: text("id").primaryKey(),
+  userId: text("user_id").notNull().default(""),
   balance: real("balance").notNull(),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 });

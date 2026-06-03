@@ -63,14 +63,26 @@ Click **Save Config** after filling everything in.
 
 ---
 
-### Step 5 — Bot API Key (Dashboard Access Control)
+### Step 5 — Logging In (Username & Password)
 
-The **Bot API Key** is a password that protects the dashboard's API so only you can control the bot.
+The dashboard is now protected by a **username and password login**. Each user gets their own separate bot, wallet credentials, and positions.
 
-- It is stored in Replit under **Secrets** (lock icon in the sidebar) as `BOT_API_KEY`.
-- To view or change it: open the Replit Secrets panel, find `BOT_API_KEY`.
-- The same value must be set in Railway → your project → **Variables → BOT_API_KEY** if you are using the deployed version.
-- Enter this key in the Settings page under "Bot API Key" so the frontend can authenticate with the server.
+**First admin account:**
+- On first startup, the server auto-creates an admin account.
+- Default username: `admin` (or set `ADMIN_USERNAME` env var on Railway)
+- Default password: `changeme123` (or set `ADMIN_PASSWORD` env var on Railway)
+- **Change this password immediately** by creating a new user in the Admin panel, then deleting the default account.
+
+**Adding more users:**
+- Log in as admin → go to the **Admin** page (in the sidebar)
+- Click "Create New User", enter a username, password, and role (User or Admin)
+- Each new user gets their own independent bot with their own config and wallet
+
+**Environment variables for Railway:**
+- `ADMIN_USERNAME` — username for the auto-created first admin (default: `admin`)
+- `ADMIN_PASSWORD` — password for the auto-created first admin (default: `changeme123`)
+- `JWT_SECRET` — secret key for signing login tokens (optional; falls back to `BOT_API_KEY`)
+- `BOT_API_KEY` — used as JWT signing secret if `JWT_SECRET` is not set
 
 ---
 

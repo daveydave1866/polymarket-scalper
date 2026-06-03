@@ -218,7 +218,7 @@ function forecastProbability(forecastHigh: number, cond: TempCondition): number 
 // ---------------------------------------------------------------------------
 // Main export: generate NWS-backed signals for weather category markets
 // ---------------------------------------------------------------------------
-export async function generateWeatherSignals(minEdge: number): Promise<number> {
+export async function generateWeatherSignals(minEdge: number, userId: string): Promise<number> {
   const weatherMarkets = await db
     .select()
     .from(marketsTable)
@@ -281,6 +281,7 @@ export async function generateWeatherSignals(minEdge: number): Promise<number> {
 
       await db.insert(signalsTable).values({
         id: randomUUID(),
+        userId,
         marketId: market.id,
         side,
         confidence: Math.min(forecastProb, 1),

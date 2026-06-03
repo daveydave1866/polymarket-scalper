@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { eq, desc } from "drizzle-orm";
 import { db, botConfigTable, signalsTable, positionsTable, marketsTable, balanceSnapshotsTable } from "@workspace/db";
 import {
@@ -15,7 +15,7 @@ import {
   GetBalanceHistoryResponse,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger.js";
-import { runDiscovery, lastDiscoveryAt, startTradingLoop, stopTradingLoop, lastCycleAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
+import { runDiscovery, startTradingLoop, stopTradingLoop, getLastCycleAt, getLastDiscoveryAt, CYCLE_INTERVAL_MS } from "../lib/engine.js";
 import { sendDailyReport, notifyBotEvent } from "../lib/telegram.js";
 import { getCredentialsStatus, resolvePolymarketCredentials } from "../lib/credentials.js";
 import { GetCredentialsStatusResponse } from "@workspace/api-zod";
@@ -23,18 +23,24 @@ import { ethers } from "ethers";
 
 const router: IRouter = Router();
 
-async function getOrCreateConfig() {
+interface AuthRequest extends Request {
+  userId?: string;
+  role?: string;
+}
+
+async function getOrCreateConfig(userId: string) {
   const [existing] = await db
     .select()
     .from(botConfigTable)
-    .where(eq(botConfigTable.id, "singleton"));
+    .where(eq(botConfigTable.id, userId));
 
   if (existing) return existing;
 
   const [created] = await db
     .insert(botConfigTable)
     .values({
-      id: "singleton",
+      id: userId,
+      userId,
       mode: "paper",
       minEdge: 0.05,
       maxPositionSize: 50,
@@ -49,17 +55,19 @@ async function getOrCreateConfig() {
   return created;
 }
 
-router.get("/bot/status", async (_req, res): Promise<void> => {
+router.get("/bot/status", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const config = await getOrCreateConfig();
-    const signals = await db.select().from(signalsTable);
-    const positions = await db.select().from(positionsTable);
+    const userId = req.userId!;
+    const config = await getOrCreateConfig(userId);
+    const signals = await db.select().from(signalsTable).where(eq(signalsTable.userId, userId));
+    const positions = await db.select().from(positionsTable).where(eq(positionsTable.userId, userId));
 
     const uptime =
       config.running && config.startedAt
         ? Math.floor((Date.now() - new Date(config.startedAt).getTime()) / 1000)
         : 0;
 
+    const lastCycleAt = getLastCycleAt(userId);
     const nextCycleAt =
       config.running && lastCycleAt
         ? new Date(lastCycleAt.getTime() + CYCLE_INTERVAL_MS).toISOString()
@@ -87,8 +95,9 @@ router.get("/bot/status", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/start", async (req, res): Promise<void> => {
+router.post("/bot/start", async (req: AuthRequest, res): Promise<void> => {
   try {
+    const userId = req.userId!;
     const parsed = StartBotBody.safeParse(req.body ?? {});
     const resetPaperBalance = parsed.success ? (parsed.data.resetPaperBalance ?? false) : false;
 
@@ -99,24 +108,21 @@ router.post("/bot/start", async (req, res): Promise<void> => {
     };
 
     if (resetPaperBalance) {
-      const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+      const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
       if (!cfg || cfg.mode === "paper") {
         updateFields.paperBalance = 1000;
       }
     }
 
-    await db
-      .update(botConfigTable)
-      .set(updateFields)
-      .where(eq(botConfigTable.id, "singleton"));
+    await db.update(botConfigTable).set(updateFields).where(eq(botConfigTable.id, userId));
 
-    startTradingLoop();
-    logger.info({ resetPaperBalance }, "Bot started");
+    startTradingLoop(userId);
+    logger.info({ resetPaperBalance, userId }, "Bot started");
 
-    const config = await getOrCreateConfig();
+    const config = await getOrCreateConfig(userId);
     notifyBotEvent("started", config.mode).catch(() => {});
-    const signals = await db.select().from(signalsTable);
-    const positions = await db.select().from(positionsTable);
+    const signals = await db.select().from(signalsTable).where(eq(signalsTable.userId, userId));
+    const positions = await db.select().from(positionsTable).where(eq(positionsTable.userId, userId));
 
     res.json(
       StartBotResponse.parse({
@@ -135,35 +141,30 @@ router.post("/bot/start", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/stop", async (_req, res): Promise<void> => {
+router.post("/bot/stop", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const [configBefore] = await db
-      .select()
-      .from(botConfigTable)
-      .where(eq(botConfigTable.id, "singleton"));
+    const userId = req.userId!;
+    const [configBefore] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
 
     const startedAt = configBefore?.startedAt ? new Date(configBefore.startedAt) : null;
     const uptimeSeconds = startedAt
       ? Math.floor((Date.now() - startedAt.getTime()) / 1000)
       : undefined;
 
-    await db
-      .update(botConfigTable)
-      .set({ running: false, startedAt: null })
-      .where(eq(botConfigTable.id, "singleton"));
+    await db.update(botConfigTable).set({ running: false, startedAt: null }).where(eq(botConfigTable.id, userId));
 
-    stopTradingLoop();
-    logger.info("Bot stopped");
+    stopTradingLoop(userId);
+    logger.info({ userId }, "Bot stopped");
 
-    const allPositions = await db.select().from(positionsTable);
+    const allPositions = await db.select().from(positionsTable).where(eq(positionsTable.userId, userId));
     const sessionTrades = startedAt
       ? allPositions.filter((p) => p.openedAt && new Date(p.openedAt) >= startedAt).length
       : allPositions.length;
 
     notifyBotEvent("stopped", undefined, uptimeSeconds, sessionTrades).catch(() => {});
 
-    const signals = await db.select().from(signalsTable);
-    const positions = await db.select().from(positionsTable);
+    const signals = await db.select().from(signalsTable).where(eq(signalsTable.userId, userId));
+    const positions = await db.select().from(positionsTable).where(eq(positionsTable.userId, userId));
 
     res.json(
       StopBotResponse.parse({
@@ -182,9 +183,9 @@ router.post("/bot/stop", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/sync-markets", async (req, res): Promise<void> => {
+router.post("/bot/sync-markets", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const result = await runDiscovery();
+    const result = await runDiscovery(req.userId!);
     res.json(SyncMarketsResponse.parse(result));
   } catch (err) {
     logger.error({ err }, "Sync markets failed");
@@ -194,6 +195,9 @@ router.post("/bot/sync-markets", async (req, res): Promise<void> => {
 
 router.get("/bot/opportunities", async (_req, res): Promise<void> => {
   try {
+    const authReq = _req as AuthRequest;
+    const lastDiscoveryAt = getLastDiscoveryAt(authReq.userId ?? "");
+
     const markets = await db
       .select()
       .from(marketsTable)
@@ -245,9 +249,9 @@ router.get("/bot/opportunities", async (_req, res): Promise<void> => {
   }
 });
 
-router.get("/bot/config", async (_req, res): Promise<void> => {
+router.get("/bot/config", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const config = await getOrCreateConfig();
+    const config = await getOrCreateConfig(req.userId!);
 
     res.json(
       GetBotConfigResponse.parse({
@@ -281,8 +285,9 @@ router.get("/bot/config", async (_req, res): Promise<void> => {
   }
 });
 
-router.put("/bot/config", async (req, res): Promise<void> => {
+router.put("/bot/config", async (req: AuthRequest, res): Promise<void> => {
   try {
+    const userId = req.userId!;
     const parsed = UpdateBotConfigBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
@@ -299,11 +304,10 @@ router.put("/bot/config", async (req, res): Promise<void> => {
     const safeRest = { ...rest } as Record<string, unknown>;
     for (const field of secretFields) {
       if (safeRest[field] === SENTINEL || safeRest[field] === undefined) {
-        delete safeRest[field]; // unchanged — keep existing DB value
+        delete safeRest[field];
       } else if (safeRest[field] === "") {
-        safeRest[field] = null; // user explicitly cleared — write NULL to remove
+        safeRest[field] = null;
       }
-      // else: non-empty string → save as new credential value
     }
 
     const [updated] = await db
@@ -312,11 +316,11 @@ router.put("/bot/config", async (req, res): Promise<void> => {
         ...(safeRest as unknown as Partial<typeof botConfigTable.$inferInsert>),
         enabledCategories: enabledCategories ? enabledCategories.join(",") : undefined,
       })
-      .where(eq(botConfigTable.id, "singleton"))
+      .where(eq(botConfigTable.id, userId))
       .returning();
 
     if (!updated) {
-      await getOrCreateConfig();
+      await getOrCreateConfig(userId);
       res.status(500).json({ error: "Config not found" });
       return;
     }
@@ -353,9 +357,9 @@ router.put("/bot/config", async (req, res): Promise<void> => {
   }
 });
 
-router.get("/bot/credentials-status", async (_req, res): Promise<void> => {
+router.get("/bot/credentials-status", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const status = await getCredentialsStatus();
+    const status = await getCredentialsStatus(req.userId!);
     res.json(GetCredentialsStatusResponse.parse(status));
   } catch (err) {
     logger.error({ err }, "GET /bot/credentials-status failed");
@@ -363,9 +367,9 @@ router.get("/bot/credentials-status", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/test-credentials", async (_req, res): Promise<void> => {
+router.post("/bot/test-credentials", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const creds = await resolvePolymarketCredentials();
+    const creds = await resolvePolymarketCredentials(req.userId!);
     if (!creds) {
       res.json(TestCredentialsResponse.parse({ ok: false, error: "No Polymarket credentials configured." }));
       return;
@@ -394,11 +398,13 @@ router.post("/bot/test-credentials", async (_req, res): Promise<void> => {
   }
 });
 
-router.get("/bot/balance-history", async (_req, res): Promise<void> => {
+router.get("/bot/balance-history", async (req: AuthRequest, res): Promise<void> => {
   try {
+    const userId = req.userId!;
     const rows = await db
       .select()
       .from(balanceSnapshotsTable)
+      .where(eq(balanceSnapshotsTable.userId, userId))
       .orderBy(desc(balanceSnapshotsTable.recordedAt))
       .limit(100);
 
@@ -439,12 +445,12 @@ router.post("/bot/verify-l1-key", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/bot/generate-l2-keys", async (req, res): Promise<void> => {
+router.post("/bot/generate-l2-keys", async (req: AuthRequest, res): Promise<void> => {
   const { privateKey: bodyKey } = req.body as { privateKey?: string };
   try {
     let pk = bodyKey?.trim() ?? "";
     if (!pk) {
-      const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+      const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, req.userId!));
       const stored = process.env.POLYMARKET_PRIVATE_KEY ?? config?.polymarketPrivateKey ?? "";
       if (!stored || stored === "••••••••") {
         res.status(400).json({ ok: false, error: "No L1 private key found. Please save your L1 wallet key first." });

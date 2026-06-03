@@ -1,21 +1,22 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { BarChart2, Settings, TrendingUp, Activity, Zap } from "lucide-react";
+import { BarChart2, Settings, TrendingUp, Activity, Zap, ShieldCheck, LogOut } from "lucide-react";
+import { useAuth } from "@/App";
 
 const NAV = [
-  { href: "/",             label: "Dashboard",      icon: Activity      },
-  { href: "/opportunities",label: "Opportunities",  icon: TrendingUp    },
-  { href: "/signals",      label: "Signals",        icon: Zap           },
-  { href: "/positions",    label: "Positions",      icon: BarChart2     },
-  { href: "/settings",     label: "Settings",       icon: Settings      },
+  { href: "/",              label: "Dashboard",      icon: Activity      },
+  { href: "/opportunities", label: "Opportunities",  icon: TrendingUp    },
+  { href: "/signals",       label: "Signals",        icon: Zap           },
+  { href: "/positions",     label: "Positions",      icon: BarChart2     },
+  { href: "/settings",      label: "Settings",       icon: Settings      },
 ];
 
 export function Sidebar() {
   const [location] = useLocation();
+  const { user, logout } = useAuth();
 
   return (
     <aside className="w-52 flex-shrink-0 border-r border-border bg-card flex flex-col h-screen sticky top-0">
-      {/* Logo */}
       <div className="px-4 py-5 border-b border-border">
         <div className="font-mono text-xs font-bold uppercase tracking-widest text-primary flex items-center gap-2">
           <span className="text-lg">⬡</span> Polymarket
@@ -25,7 +26,6 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 py-4 space-y-0.5 px-2">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = location === href || (href !== "/" && location.startsWith(href));
@@ -43,11 +43,37 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {user?.role === "admin" && (
+          <Link href="/admin"
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 font-mono text-[11px] uppercase tracking-wider transition-colors",
+              location === "/admin"
+                ? "text-primary bg-primary/8 border-l-2 border-primary"
+                : "text-muted-foreground/60 hover:text-foreground hover:bg-muted/20 border-l-2 border-transparent"
+            )}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />
+            Admin
+          </Link>
+        )}
       </nav>
 
-      {/* Footer */}
-      <div className="px-4 py-4 border-t border-border">
-        <div className="font-mono text-[9px] text-muted-foreground/30 uppercase tracking-wider">
+      <div className="px-4 py-4 border-t border-border space-y-3">
+        {user && (
+          <div className="font-mono text-[9px] text-muted-foreground/60 uppercase tracking-wider truncate">
+            {user.username}
+            {user.role === "admin" && <span className="ml-1 text-primary/60">· admin</span>}
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 text-muted-foreground/50 hover:text-foreground font-mono text-[10px] uppercase tracking-wider transition-colors w-full"
+        >
+          <LogOut className="w-3 h-3" />
+          Sign Out
+        </button>
+        <div className="font-mono text-[9px] text-muted-foreground/20 uppercase tracking-wider">
           Polymarket API v4
         </div>
       </div>

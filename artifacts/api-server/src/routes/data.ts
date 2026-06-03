@@ -1,21 +1,27 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { db, signalsTable, positionsTable, marketsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-router.get("/signals", async (_req, res): Promise<void> => {
+interface AuthRequest extends Request {
+  userId?: string;
+}
+
+router.get("/signals", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const signals = await db.select().from(signalsTable);
+    const userId = req.userId!;
+    const signals = await db.select().from(signalsTable).where(eq(signalsTable.userId, userId));
     res.json(signals);
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.get("/positions", async (_req, res): Promise<void> => {
+router.get("/positions", async (req: AuthRequest, res): Promise<void> => {
   try {
-    const positions = await db.select().from(positionsTable);
+    const userId = req.userId!;
+    const positions = await db.select().from(positionsTable).where(eq(positionsTable.userId, userId));
 
     const marketIds = [...new Set(positions.map((p) => p.marketId))];
     const questionMap = new Map<string, string>();

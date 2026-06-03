@@ -18,7 +18,7 @@ import type {
 
 function getStoredKey(): string | null {
   try {
-    return localStorage.getItem("bot_api_key");
+    return localStorage.getItem("jwt_token") ?? localStorage.getItem("bot_api_key");
   } catch {
     return null;
   }

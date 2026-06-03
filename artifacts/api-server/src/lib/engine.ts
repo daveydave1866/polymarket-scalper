@@ -9,8 +9,6 @@ import { generateWeatherSignals } from "./weather-signals.js";
 
 export { resolvePolymarketCredentials };
 
-export let lastDiscoveryAt: Date | null = null;
-
 const POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com";
 const CLOB_HOST = "https://clob.polymarket.com";
 const CHAIN_ID = 137;
@@ -18,8 +16,24 @@ const CHAIN_ID = 137;
 const TAKE_PROFIT_RATIO = 0.06;
 const STOP_LOSS_RATIO = 0.04;
 const MAX_POSITION_AGE_MS = 24 * 60 * 60 * 1000;
-
 const STALE_ORDER_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+export const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
+
+const tradingLoopTimers = new Map<string, ReturnType<typeof setInterval>>();
+const lastCycleTimes = new Map<string, Date>();
+const lastDiscoveryTimes = new Map<string, Date>();
+const lastDailyReportDates = new Map<string, string>();
+
+export function getLastDiscoveryAt(userId: string): Date | null {
+  return lastDiscoveryTimes.get(userId) ?? null;
+}
+export function getLastCycleAt(userId: string): Date | null {
+  return lastCycleTimes.get(userId) ?? null;
+}
+export function isTradingLoopRunning(userId: string): boolean {
+  return tradingLoopTimers.has(userId);
+}
 
 interface GammaMarket {
   id: string;
@@ -67,8 +81,8 @@ function categorize(question: string): string {
   return "other";
 }
 
-export async function runDiscovery(): Promise<{ synced: number; total: number; lastSyncAt: string }> {
-  logger.info("Starting market discovery...");
+export async function runDiscovery(userId: string): Promise<{ synced: number; total: number; lastSyncAt: string }> {
+  logger.info({ userId }, "Starting market discovery...");
   const markets = await fetchPolymarkets();
 
   if (markets.length === 0) {
@@ -78,98 +92,90 @@ export async function runDiscovery(): Promise<{ synced: number; total: number; l
 
   let synced = 0;
 
-  for (const m of markets.slice(0, 30)) {
-    try {
-      let yesPrice = 0.5;
-      let noPrice  = 0.5;
+  for (const m of markets) {
+    if (!m.id || !m.question) continue;
 
-      if (m.outcomePrices && m.outcomes) {
-        try {
-          const prices   = JSON.parse(m.outcomePrices) as string[];
-          const outcomes = JSON.parse(m.outcomes) as string[];
-          const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === "yes");
-          const noIdx  = outcomes.findIndex((o) => o.toLowerCase() === "no");
+    const yesToken = m.tokens?.find((t) => t.outcome.toLowerCase() === "yes");
+    const noToken = m.tokens?.find((t) => t.outcome.toLowerCase() === "no");
 
-          if (yesIdx !== -1 && prices[yesIdx] !== undefined) {
-            yesPrice = parseFloat(prices[yesIdx]);
-          } else if (prices[0] !== undefined) {
-            yesPrice = parseFloat(prices[0]);
-          }
+    let yesPrice = yesToken ? parseFloat(yesToken.price) : 0.5;
+    let noPrice = noToken ? parseFloat(noToken.price) : 0.5;
 
-          if (noIdx !== -1 && prices[noIdx] !== undefined) {
-            noPrice = parseFloat(prices[noIdx]);
-          } else if (prices[1] !== undefined) {
-            noPrice = parseFloat(prices[1]);
-          } else {
-            noPrice = 1 - yesPrice;
-          }
-        } catch {
-          // keep defaults
+    if (m.outcomePrices) {
+      try {
+        const prices = JSON.parse(m.outcomePrices) as string[];
+        if (prices.length >= 2) {
+          yesPrice = parseFloat(prices[0]);
+          noPrice = parseFloat(prices[1]);
         }
-      } else if (m.tokens && m.tokens.length > 0) {
-        const yesToken = m.tokens.find((t) => t.outcome.toLowerCase() === "yes");
-        const noToken  = m.tokens.find((t) => t.outcome.toLowerCase() === "no");
-        if (yesToken) yesPrice = parseFloat(yesToken.price);
-        if (noToken)  noPrice  = parseFloat(noToken.price);
-        else          noPrice  = 1 - yesPrice;
-      }
+      } catch { /* use token prices */ }
+    }
 
-      if (isNaN(yesPrice)) yesPrice = 0.5;
-      if (isNaN(noPrice))  noPrice  = 1 - yesPrice;
+    const volume = parseFloat(m.volume ?? "0") || 0;
+    const liquidity = parseFloat(m.liquidity ?? "0") || 0;
+    const category = categorize(m.question);
 
+    try {
       await db
         .insert(marketsTable)
         .values({
-          id: m.id ?? randomUUID(),
+          id: m.id,
           question: m.question,
-          category: categorize(m.question),
-          yesPrice,
-          noPrice,
-          volume:    parseFloat(m.volume    ?? "0") || 0,
-          liquidity: parseFloat(m.liquidity ?? "0") || 0,
-          endDate:   m.endDate   ?? null,
-          conditionId: m.conditionId ?? null,
-          slug: m.slug ?? null,
-          outcomes: m.outcomes ?? null,
-          clobTokenIds: m.clobTokenIds ?? null,
+          category,
+          yesPrice: isNaN(yesPrice) ? 0.5 : yesPrice,
+          noPrice: isNaN(noPrice) ? 0.5 : noPrice,
+          volume,
+          liquidity,
+          endDate: m.endDate,
+          conditionId: m.conditionId,
+          slug: m.slug,
+          outcomes: m.outcomes,
+          clobTokenIds: m.clobTokenIds,
           isTracked: true,
+          lastSyncAt: new Date(),
         })
         .onConflictDoUpdate({
           target: marketsTable.id,
           set: {
-            yesPrice,
-            noPrice,
-            volume:    parseFloat(m.volume    ?? "0") || 0,
-            liquidity: parseFloat(m.liquidity ?? "0") || 0,
-            outcomes: m.outcomes ?? null,
-            clobTokenIds: m.clobTokenIds ?? null,
+            question: m.question,
+            category,
+            yesPrice: isNaN(yesPrice) ? 0.5 : yesPrice,
+            noPrice: isNaN(noPrice) ? 0.5 : noPrice,
+            volume,
+            liquidity,
+            endDate: m.endDate,
+            conditionId: m.conditionId,
+            slug: m.slug,
+            outcomes: m.outcomes,
+            clobTokenIds: m.clobTokenIds,
+            isTracked: true,
             lastSyncAt: new Date(),
           },
         });
-
       synced++;
     } catch (err) {
       logger.error({ err, marketId: m.id }, "Failed to upsert market");
     }
   }
 
-  lastDiscoveryAt = new Date();
+  const now = new Date();
+  lastDiscoveryTimes.set(userId, now);
   logger.info({ synced, total: markets.length }, "Market discovery complete");
 
-  const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+  const [cfg] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
   const minEdge = cfg?.minEdge ?? 0.05;
 
-  await generateSignals();
-  const weatherSignals = await generateWeatherSignals(minEdge);
+  await generateSignals(userId);
+  const weatherSignals = await generateWeatherSignals(minEdge, userId);
   if (weatherSignals > 0) {
     logger.info({ weatherSignals }, "NWS weather signals generated");
   }
 
-  return { synced, total: markets.length, lastSyncAt: lastDiscoveryAt.toISOString() };
+  return { synced, total: markets.length, lastSyncAt: now.toISOString() };
 }
 
-async function generateSignals() {
-  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+async function generateSignals(userId: string) {
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
   if (!config) return;
 
   const priceMin = config.priceMin ?? 0.05;
@@ -183,42 +189,31 @@ async function generateSignals() {
   const pendingNotifications: Array<{ id: string; question: string; side: string; edge: number; confidence: number }> = [];
 
   for (const market of markets) {
-    // Skip near-settled markets: both outcome prices must be within the tradeable range
     if (
       market.yesPrice < priceMin || market.yesPrice > priceMax ||
       market.noPrice < priceMin || market.noPrice > priceMax
     ) {
       logger.debug(
-        { marketId: market.id, yesPrice: market.yesPrice, noPrice: market.noPrice, priceMin, priceMax, skip: "price_out_of_range" },
-        `Signal skipped: one or both prices outside tradeable range [${priceMin}, ${priceMax}]`
+        { marketId: market.id, yesPrice: market.yesPrice, noPrice: market.noPrice, priceMin, priceMax },
+        `Signal skipped: price outside tradeable range`
       );
       await db.update(marketsTable).set({ skipReason: "Price out of range" }).where(eq(marketsTable.id, market.id));
       continue;
     }
 
-    // Skip markets expiring within the configured minimum time-to-resolution
     if (market.endDate) {
       const endsAt = new Date(market.endDate).getTime();
       if (!isFinite(endsAt)) {
-        logger.debug(
-          { marketId: market.id, endDate: market.endDate, skip: "unparseable_end_date" },
-          "Signal skipped: endDate could not be parsed"
-        );
         await db.update(marketsTable).set({ skipReason: "Invalid end date" }).where(eq(marketsTable.id, market.id));
         continue;
       }
       const hoursLeft = (endsAt - Date.now()) / (1000 * 60 * 60);
       if (hoursLeft < minTtrHours) {
-        logger.debug(
-          { marketId: market.id, endDate: market.endDate, hoursLeft: hoursLeft.toFixed(1), minTtrHours, skip: "expiring_soon" },
-          `Signal skipped: market expires within ${minTtrHours} hours`
-        );
         await db.update(marketsTable).set({ skipReason: "Expiring soon" }).where(eq(marketsTable.id, market.id));
         continue;
       }
     }
 
-    // Market passed all filters — clear any previously recorded skip reason
     if (market.skipReason) {
       await db.update(marketsTable).set({ skipReason: null }).where(eq(marketsTable.id, market.id));
     }
@@ -233,6 +228,7 @@ async function generateSignals() {
         const id = randomUUID();
         await db.insert(signalsTable).values({
           id,
+          userId,
           marketId: market.id,
           side,
           confidence,
@@ -267,8 +263,8 @@ async function generateSignals() {
 
   if (pendingNotifications.length > 0) {
     logger.info(
-      { total: pendingNotifications.length, notified: toNotify.length, notifyMinEdge, notifyMaxPerCycle },
-      "Signal generation complete — notifications sent for top signals above notify threshold",
+      { total: pendingNotifications.length, notified: toNotify.length },
+      "Signal generation complete",
     );
   }
 }
@@ -280,10 +276,10 @@ type MarketForOrdering = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function buildClobClient(): Promise<any | null> {
-  const creds = await resolvePolymarketCredentials();
+async function buildClobClient(userId: string): Promise<any | null> {
+  const creds = await resolvePolymarketCredentials(userId);
   if (!creds) {
-    logger.warn("No Polymarket credentials available");
+    logger.warn({ userId }, "No Polymarket credentials available");
     await notifyError("API auth failure: Polymarket credentials are missing or incomplete. Live trading is paused.").catch(() => {});
     return null;
   }
@@ -381,20 +377,23 @@ function parseOrderFill(order: any, fallbackPrice: number, fallbackSize: number)
   return { fullyFilled, anyFilled, fillRatio, cancelled, fillPrice, filledSize, totalSize };
 }
 
-async function activatePendingPositions(): Promise<void> {
+async function activatePendingPositions(userId: string): Promise<void> {
   const inflight = await db
     .select()
     .from(positionsTable)
     .where(
-      inArray(positionsTable.status, ["pending", "closing"]),
+      and(
+        eq(positionsTable.userId, userId),
+        inArray(positionsTable.status, ["pending", "closing"]),
+      ),
     );
 
   if (inflight.length === 0) return;
 
-  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
   const partialFillThreshold = config?.partialFillThreshold ?? 0.5;
 
-  const client = await buildClobClient();
+  const client = await buildClobClient(userId);
   if (!client) return;
 
   for (const pos of inflight) {
@@ -412,8 +411,6 @@ async function activatePendingPositions(): Promise<void> {
           logger.info({ positionId: pos.id }, "Live entry order cancelled/expired — position voided");
         } else if (shouldActivate) {
           if (!fullyFilled) {
-            // Partial fill above threshold: cancel remaining open order quantity
-            // so no further fills can desync recorded position size from actual exposure.
             let residualCancelled = false;
             try {
               await client.cancelOrder({ orderID: pos.orderId });
@@ -421,12 +418,12 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                residualCancelled = true; // already gone — safe to proceed
+                residualCancelled = true;
               } else {
                 logger.warn({ cancelErr, positionId: pos.id }, "Could not cancel residual entry order after partial fill — will retry next cycle");
               }
             }
-            if (!residualCancelled) continue; // retry next cycle once cancel succeeds
+            if (!residualCancelled) continue;
           }
 
           await db
@@ -438,8 +435,8 @@ async function activatePendingPositions(): Promise<void> {
             logger.info({ positionId: pos.id, fillPrice, filledSize }, "Live position activated on full entry fill");
           } else {
             logger.info(
-              { positionId: pos.id, fillPrice, filledSize, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
-              "Live position activated on partial fill (above threshold) — residual order cancelled",
+              { positionId: pos.id, fillPrice, filledSize, fillRatio: fillRatio.toFixed(3) },
+              "Live position activated on partial fill — residual order cancelled",
             );
           }
 
@@ -450,7 +447,7 @@ async function activatePendingPositions(): Promise<void> {
         } else {
           if (anyFilled) {
             logger.debug(
-              { positionId: pos.id, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
+              { positionId: pos.id, fillRatio: fillRatio.toFixed(3) },
               "Partial fill below threshold — continuing to poll for more fills",
             );
           }
@@ -464,15 +461,14 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                logger.warn({ positionId: pos.id }, "Stale pending order already gone on exchange — checking for partial fill");
+                logger.warn({ positionId: pos.id }, "Stale pending order already gone — checking for partial fill");
                 cancelConfirmed = true;
               } else {
-                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale pending order failed transiently — will retry next cycle");
+                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale pending order failed — will retry next cycle");
               }
             }
             if (cancelConfirmed) {
               if (anyFilled) {
-                // Some quantity traded before we timed out — activate at matched size
                 await db
                   .update(positionsTable)
                   .set({ status: "open", entryPrice: fillPrice, currentPrice: fillPrice, size: filledSize, pnl: 0 })
@@ -508,7 +504,6 @@ async function activatePendingPositions(): Promise<void> {
             .where(eq(positionsTable.id, pos.id));
         } else if (shouldClose) {
           if (fullyFilled) {
-            // Full close: record the position as closed, including any previously realized P&L.
             const closingPnl = parseFloat(((fillPrice - pos.entryPrice) * pos.size).toFixed(4));
             const pnl = parseFloat((closingPnl + (pos.realizedPnl ?? 0)).toFixed(4));
             await db
@@ -522,9 +517,6 @@ async function activatePendingPositions(): Promise<void> {
               await notifyTrade("closed", mkt.question, pos.side, pos.size, fillPrice, pnl).catch(() => {});
             }
           } else {
-            // Partial close above threshold: cancel the residual close order so no further
-            // fills can occur on this stale order, then reduce the tracked position size to
-            // the remaining exposure and accumulate realized P&L for future reference.
             let residualCancelled = false;
             try {
               await client.cancelOrder({ orderID: pos.closeOrderId! });
@@ -532,7 +524,7 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                residualCancelled = true; // already gone — safe to finalise
+                residualCancelled = true;
               } else {
                 logger.warn({ cancelErr, positionId: pos.id }, "Could not cancel residual close order after partial fill — will retry next cycle");
               }
@@ -554,15 +546,15 @@ async function activatePendingPositions(): Promise<void> {
                 })
                 .where(eq(positionsTable.id, pos.id));
               logger.info(
-                { positionId: pos.id, fillPrice, closedSize, remainingSize, addedRealizedPnl, newRealizedPnl, fillRatio: fillRatio.toFixed(3) },
-                "Partial close above threshold — residual order cancelled, size reduced to remaining exposure, realized P&L accumulated",
+                { positionId: pos.id, fillPrice, closedSize, remainingSize, addedRealizedPnl, newRealizedPnl },
+                "Partial close above threshold — residual order cancelled, size reduced",
               );
             }
           }
         } else {
           if (anyFilled) {
             logger.debug(
-              { positionId: pos.id, fillRatio: fillRatio.toFixed(3), threshold: partialFillThreshold },
+              { positionId: pos.id, fillRatio: fillRatio.toFixed(3) },
               "Partial close fill below threshold — continuing to poll",
             );
           }
@@ -577,15 +569,14 @@ async function activatePendingPositions(): Promise<void> {
             } catch (cancelErr) {
               const errMsg = cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
               if (isOrderAlreadyGone(errMsg)) {
-                logger.warn({ positionId: pos.id }, "Stale closing order already gone on exchange — checking for partial fill");
+                logger.warn({ positionId: pos.id }, "Stale closing order already gone — checking for partial fill");
                 cancelConfirmed = true;
               } else {
-                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale closing order failed transiently — will retry next cycle");
+                logger.warn({ cancelErr, positionId: pos.id }, "Cancel request for stale closing order failed — will retry next cycle");
               }
             }
             if (cancelConfirmed) {
               if (anyFilled) {
-                // Some quantity closed before timeout — reduce size and accumulate realized P&L
                 const closedSize = parseFloat((pos.size * fillRatio).toFixed(8));
                 const remainingSize = parseFloat((pos.size - closedSize).toFixed(8));
                 const addedRealizedPnl = parseFloat(((fillPrice - pos.entryPrice) * closedSize).toFixed(4));
@@ -596,7 +587,7 @@ async function activatePendingPositions(): Promise<void> {
                   .where(eq(positionsTable.id, pos.id));
                 logger.info(
                   { positionId: pos.id, closedSize, remainingSize, addedRealizedPnl },
-                  "Stale closing order cancelled with partial fill — position size reduced, realized P&L recorded",
+                  "Stale closing order cancelled with partial fill — position size reduced",
                 );
               } else {
                 await db
@@ -619,14 +610,19 @@ async function activatePendingPositions(): Promise<void> {
   }
 }
 
-export async function executeTrades(): Promise<void> {
-  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+export async function executeTrades(userId: string): Promise<void> {
+  const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
   if (!config || !config.running) return;
 
   const openPositions = await db
     .select()
     .from(positionsTable)
-    .where(notInArray(positionsTable.status, ["closed", "cancelled"]));
+    .where(
+      and(
+        eq(positionsTable.userId, userId),
+        notInArray(positionsTable.status, ["closed", "cancelled"]),
+      ),
+    );
 
   if (openPositions.length >= config.maxOpenPositions) {
     logger.debug({ count: openPositions.length }, "Max open/pending positions reached, skipping execution");
@@ -640,6 +636,7 @@ export async function executeTrades(): Promise<void> {
     await db
       .select({ signalId: positionsTable.signalId })
       .from(positionsTable)
+      .where(eq(positionsTable.userId, userId))
   )
     .map((r) => r.signalId)
     .filter((id): id is string => id !== null && id !== undefined);
@@ -651,9 +648,12 @@ export async function executeTrades(): Promise<void> {
     .select()
     .from(signalsTable)
     .where(
-      existingSignalIds.length > 0
-        ? and(gte(signalsTable.createdAt, cutoff), notInArray(signalsTable.id, existingSignalIds))
-        : gte(signalsTable.createdAt, cutoff),
+      and(
+        eq(signalsTable.userId, userId),
+        existingSignalIds.length > 0
+          ? and(gte(signalsTable.createdAt, cutoff), notInArray(signalsTable.id, existingSignalIds))
+          : gte(signalsTable.createdAt, cutoff),
+      ),
     )
     .orderBy(desc(signalsTable.edge))
     .limit(slots * 3);
@@ -683,6 +683,7 @@ export async function executeTrades(): Promise<void> {
     if (config.mode === "paper") {
       await db.insert(positionsTable).values({
         id: randomUUID(),
+        userId,
         marketId: signal.marketId,
         signalId: signal.id,
         side: signal.side,
@@ -696,7 +697,7 @@ export async function executeTrades(): Promise<void> {
       await db
         .update(botConfigTable)
         .set({ paperBalance: balance - size })
-        .where(eq(botConfigTable.id, "singleton"));
+        .where(eq(botConfigTable.id, userId));
 
       openMarketIds.add(signal.marketId);
       executed++;
@@ -714,7 +715,7 @@ export async function executeTrades(): Promise<void> {
         continue;
       }
 
-      const client = await buildClobClient();
+      const client = await buildClobClient(userId);
       if (!client) continue;
 
       const orderId = await placeLiveOrder(client, market, signal.side, "BUY", entryPrice, size);
@@ -722,6 +723,7 @@ export async function executeTrades(): Promise<void> {
 
       await db.insert(positionsTable).values({
         id: randomUUID(),
+        userId,
         marketId: signal.marketId,
         signalId: signal.id,
         orderId,
@@ -748,20 +750,25 @@ export async function executeTrades(): Promise<void> {
   }
 }
 
-export async function monitorPositions(): Promise<void> {
-  await activatePendingPositions();
+export async function monitorPositions(userId: string): Promise<void> {
+  await activatePendingPositions(userId);
 
   const openPositions = await db
     .select()
     .from(positionsTable)
-    .where(eq(positionsTable.status, "open"));
+    .where(
+      and(
+        eq(positionsTable.userId, userId),
+        eq(positionsTable.status, "open"),
+      ),
+    );
 
   if (openPositions.length === 0) return;
 
   const [config] = await db
     .select()
     .from(botConfigTable)
-    .where(eq(botConfigTable.id, "singleton"));
+    .where(eq(botConfigTable.id, userId));
   if (!config) return;
 
   const marketIds = [...new Set(openPositions.map((p) => p.marketId))];
@@ -795,98 +802,72 @@ export async function monitorPositions(): Promise<void> {
         "max-age";
 
       if (config.mode === "live") {
-        if (!liveClient) liveClient = await buildClobClient();
+        if (!liveClient) liveClient = await buildClobClient(userId);
 
-        if (liveClient) {
-          const closeOrderId = await placeLiveOrder(
-            liveClient,
-            market,
-            pos.side,
-            "SELL",
-            currentPrice,
-            pos.size,
-          );
+        const closeOrderId = await placeLiveOrder(
+          liveClient,
+          market,
+          pos.side,
+          "SELL",
+          currentPrice,
+          pos.size,
+        );
 
-          if (!closeOrderId) {
-            logger.warn({ positionId: pos.id }, "Could not submit live close order — retrying next cycle");
-            await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
-            continue;
-          }
-
-          logger.info({ positionId: pos.id, closeOrderId, reason }, "Live close order submitted — awaiting fill confirmation");
-          await db
-            .update(positionsTable)
-            .set({ currentPrice, pnl, status: "closing", closeOrderId, closeOrderPlacedAt: new Date() })
-            .where(eq(positionsTable.id, pos.id));
-        } else {
+        if (!closeOrderId) {
+          logger.warn({ positionId: pos.id }, "Could not submit live close order — retrying next cycle");
           await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
           continue;
         }
-      } else {
+
+        logger.info({ positionId: pos.id, closeOrderId, reason }, "Live close order submitted — awaiting fill confirmation");
         await db
           .update(positionsTable)
-          .set({ currentPrice, pnl, status: "closed", closedAt: new Date(), closedPrice: currentPrice })
+          .set({ currentPrice, pnl, status: "closing", closeOrderId, closeOrderPlacedAt: new Date() })
           .where(eq(positionsTable.id, pos.id));
-
-        const refund = pos.size + pnl;
-        const newBalance = (config.paperBalance ?? 0) + Math.max(0, refund);
-        await db
-          .update(botConfigTable)
-          .set({ paperBalance: parseFloat(newBalance.toFixed(4)) })
-          .where(eq(botConfigTable.id, "singleton"));
-      }
-
-      logger.info({ positionId: pos.id, pnl, reason, mode: config.mode }, "Position close initiated");
-      if (config.mode === "paper") {
-        await notifyTrade("closed", market.question, pos.side, pos.size, currentPrice, pnl).catch(() => {});
+      } else {
+        await db.update(positionsTable).set({ currentPrice, pnl }).where(eq(positionsTable.id, pos.id));
+        continue;
       }
     } else {
       await db
         .update(positionsTable)
-        .set({ currentPrice, pnl })
+        .set({ currentPrice, pnl, status: "closed", closedAt: new Date(), closedPrice: currentPrice })
         .where(eq(positionsTable.id, pos.id));
+
+      const refund = pos.size + pnl;
+      const newBalance = (config.paperBalance ?? 0) + Math.max(0, refund);
+      await db
+        .update(botConfigTable)
+        .set({ paperBalance: parseFloat(newBalance.toFixed(4)) })
+        .where(eq(botConfigTable.id, userId));
+
+      logger.info({ positionId: pos.id, pnl, reason: shouldClose ? "tp/sl/age" : "update", mode: config.mode }, "Position close initiated");
+      if (config.mode === "paper") {
+        await notifyTrade("closed", market.question, pos.side, pos.size, currentPrice, pnl).catch(() => {});
+      }
     }
-  }
-}
 
-let tradingLoopTimer: ReturnType<typeof setInterval> | null = null;
-export const CYCLE_INTERVAL_MS = 5 * 60 * 1000;
-export let lastCycleAt: Date | null = null;
-
-let lastDailyReportDate: string | null = null;
-
-async function maybeSendDailyReport(): Promise<void> {
-  try {
-    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
-    if (!config) return;
-
-    const reportHour = config.dailyReportHour ?? 8;
-    const now = new Date();
-    const currentHour = now.getUTCHours();
-    const todayKey = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}`;
-
-    if (currentHour === reportHour && lastDailyReportDate !== todayKey) {
-      await sendDailyReport();
-      lastDailyReportDate = todayKey;
-    }
-  } catch (err) {
-    logger.error({ err }, "Failed to send scheduled daily report");
+    await db
+      .update(positionsTable)
+      .set({ currentPrice, pnl })
+      .where(eq(positionsTable.id, pos.id));
   }
 }
 
 const BALANCE_SNAPSHOT_LIMIT = 100;
 
-async function recordBalanceSnapshot(): Promise<void> {
+async function recordBalanceSnapshot(userId: string): Promise<void> {
   try {
-    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton"));
+    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
     if (!config || config.mode !== "paper") return;
 
     const balance = config.paperBalance ?? 1000;
-    await db.insert(balanceSnapshotsTable).values({ id: randomUUID(), balance, recordedAt: new Date() });
+    await db.insert(balanceSnapshotsTable).values({ id: randomUUID(), userId, balance, recordedAt: new Date() });
 
     const allSnapshots = await db
       .select({ id: balanceSnapshotsTable.id })
       .from(balanceSnapshotsTable)
+      .where(eq(balanceSnapshotsTable.userId, userId))
       .orderBy(desc(balanceSnapshotsTable.recordedAt));
 
     if (allSnapshots.length > BALANCE_SNAPSHOT_LIMIT) {
@@ -898,16 +879,35 @@ async function recordBalanceSnapshot(): Promise<void> {
   }
 }
 
-async function runTradingCycle(): Promise<void> {
+async function maybeSendDailyReport(userId: string): Promise<void> {
   try {
-    lastCycleAt = new Date();
-    logger.info("Trading cycle start");
-    await runDiscovery();
-    await executeTrades();
-    await monitorPositions();
-    await recordBalanceSnapshot();
-    await maybeSendDailyReport();
-    logger.info("Trading cycle complete");
+    const [config] = await db.select().from(botConfigTable).where(eq(botConfigTable.id, userId));
+    if (!config) return;
+
+    const reportHour = config.dailyReportHour ?? 8;
+    const now = new Date();
+    const currentHour = now.getUTCHours();
+    const todayKey = `${userId}:${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}`;
+
+    if (currentHour === reportHour && lastDailyReportDates.get(userId) !== todayKey) {
+      await sendDailyReport();
+      lastDailyReportDates.set(userId, todayKey);
+    }
+  } catch (err) {
+    logger.error({ err }, "Failed to send scheduled daily report");
+  }
+}
+
+async function runTradingCycle(userId: string): Promise<void> {
+  try {
+    lastCycleTimes.set(userId, new Date());
+    logger.info({ userId }, "Trading cycle start");
+    await runDiscovery(userId);
+    await executeTrades(userId);
+    await monitorPositions(userId);
+    await recordBalanceSnapshot(userId);
+    await maybeSendDailyReport(userId);
+    logger.info({ userId }, "Trading cycle complete");
   } catch (err) {
     logger.error({ err }, "Unhandled error in trading cycle");
     const message = err instanceof Error ? err.message : String(err);
@@ -915,21 +915,19 @@ async function runTradingCycle(): Promise<void> {
   }
 }
 
-export function startTradingLoop(): void {
-  if (tradingLoopTimer) return;
-  logger.info("Starting trading loop");
-  runTradingCycle();
-  tradingLoopTimer = setInterval(runTradingCycle, CYCLE_INTERVAL_MS);
+export function startTradingLoop(userId: string): void {
+  if (tradingLoopTimers.has(userId)) return;
+  logger.info({ userId }, "Starting trading loop");
+  runTradingCycle(userId);
+  const timer = setInterval(() => runTradingCycle(userId), CYCLE_INTERVAL_MS);
+  tradingLoopTimers.set(userId, timer);
 }
 
-export function stopTradingLoop(): void {
-  if (tradingLoopTimer) {
-    clearInterval(tradingLoopTimer);
-    tradingLoopTimer = null;
-    logger.info("Trading loop stopped");
+export function stopTradingLoop(userId: string): void {
+  const timer = tradingLoopTimers.get(userId);
+  if (timer) {
+    clearInterval(timer);
+    tradingLoopTimers.delete(userId);
+    logger.info({ userId }, "Trading loop stopped");
   }
-}
-
-export function isTradingLoopRunning(): boolean {
-  return tradingLoopTimer !== null;
 }

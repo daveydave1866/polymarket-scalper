@@ -7,24 +7,24 @@ const SENTINEL = "••••••••";
 
 type DbConfig = typeof botConfigTable.$inferSelect;
 
-async function getConfig(): Promise<DbConfig | null> {
+async function getConfig(userId: string): Promise<DbConfig | null> {
   try {
     const [config] = await db
       .select()
       .from(botConfigTable)
-      .where(eq(botConfigTable.id, "singleton"));
+      .where(eq(botConfigTable.id, userId));
     return config ?? null;
   } catch {
     return null;
   }
 }
 
-export async function seedCredentialsFromEnv(): Promise<void> {
+export async function seedCredentialsFromEnv(userId: string): Promise<void> {
   try {
     const [config] = await db
       .select()
       .from(botConfigTable)
-      .where(eq(botConfigTable.id, "singleton"));
+      .where(eq(botConfigTable.id, userId));
 
     if (!config) return;
 
@@ -52,7 +52,7 @@ export async function seedCredentialsFromEnv(): Promise<void> {
     await db
       .update(botConfigTable)
       .set(updates)
-      .where(eq(botConfigTable.id, "singleton"));
+      .where(eq(botConfigTable.id, userId));
 
     logger.info(
       { fields: Object.keys(updates) },
@@ -75,40 +75,22 @@ export interface TelegramCredentials {
   chatId: string;
 }
 
-export async function resolvePolymarketCredentials(): Promise<PolymarketCredentials | null> {
-  const envPrivateKey = process.env.POLYMARKET_PRIVATE_KEY;
-  const envApiKey = process.env.POLYMARKET_API_KEY;
-  const envApiSecret = process.env.POLYMARKET_API_SECRET;
-  const envApiPassphrase = process.env.POLYMARKET_API_PASSPHRASE;
+export async function resolvePolymarketCredentials(userId: string): Promise<PolymarketCredentials | null> {
+  const config = await getConfig(userId);
 
-  if (envPrivateKey && envApiKey && envApiSecret && envApiPassphrase) {
-    logger.debug("Polymarket credentials resolved from environment variables");
-    return {
-      privateKey: envPrivateKey,
-      apiKey: envApiKey,
-      apiSecret: envApiSecret,
-      apiPassphrase: envApiPassphrase,
-    };
-  }
-
-  const config = await getConfig();
-  if (!config) return null;
-
-  const privateKey = envPrivateKey ?? config.polymarketPrivateKey;
-  const apiKey = envApiKey ?? config.polymarketApiKey;
-  const apiSecret = envApiSecret ?? config.polymarketApiSecret;
-  const apiPassphrase = envApiPassphrase ?? config.polymarketApiPassphrase;
+  const privateKey = process.env.POLYMARKET_PRIVATE_KEY ?? config?.polymarketPrivateKey;
+  const apiKey = process.env.POLYMARKET_API_KEY ?? config?.polymarketApiKey;
+  const apiSecret = process.env.POLYMARKET_API_SECRET ?? config?.polymarketApiSecret;
+  const apiPassphrase = process.env.POLYMARKET_API_PASSPHRASE ?? config?.polymarketApiPassphrase;
 
   if (!privateKey || !apiKey || !apiSecret || !apiPassphrase) return null;
 
-  logger.debug("Polymarket credentials resolved from DB config (with optional env override)");
   return { privateKey, apiKey, apiSecret, apiPassphrase };
 }
 
-export async function getCredentialsStatus(): Promise<GetCredentialsStatusResponseType> {
-  const config = await getConfig();
+export async function getCredentialsStatus(userId: string): Promise<GetCredentialsStatusResponseType> {
+  const config = await getConfig(userId);
 
-  // ── Polymarket ──────────────────────────────────────────────────────────────
   const pmEnv = !!(
     process.env.POLYMARKET_PRIVATE_KEY &&
     process.env.POLYMARKET_API_KEY &&
@@ -127,7 +109,6 @@ export async function getCredentialsStatus(): Promise<GetCredentialsStatusRespon
     ? { configured: true, source: "db" as const }
     : { configured: false, source: "none" as const };
 
-  // ── Telegram ────────────────────────────────────────────────────────────────
   const tgEnv = !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
   const tgDb = !!(config?.telegramBotToken && config?.telegramChatId);
   const telegram = tgEnv
@@ -136,7 +117,6 @@ export async function getCredentialsStatus(): Promise<GetCredentialsStatusRespon
     ? { configured: true, source: "db" as const }
     : { configured: false, source: "none" as const };
 
-  // ── Sports API ──────────────────────────────────────────────────────────────
   const saEnv = !!process.env.SPORTS_API_KEY;
   const saDb = !!config?.sportsApiKey;
   const sportsApi = saEnv
@@ -145,7 +125,6 @@ export async function getCredentialsStatus(): Promise<GetCredentialsStatusRespon
     ? { configured: true, source: "db" as const }
     : { configured: false, source: "none" as const };
 
-  // ── Weather API ─────────────────────────────────────────────────────────────
   const waEnv = !!process.env.WEATHER_API_KEY;
   const waDb = !!config?.weatherApiKey;
   const weatherApi = waEnv
@@ -157,16 +136,15 @@ export async function getCredentialsStatus(): Promise<GetCredentialsStatusRespon
   return { polymarket, telegram, sportsApi, weatherApi };
 }
 
-export async function resolveTelegramCredentials(): Promise<TelegramCredentials | null> {
+export async function resolveTelegramCredentials(userId: string): Promise<TelegramCredentials | null> {
   const envBotToken = process.env.TELEGRAM_BOT_TOKEN;
   const envChatId = process.env.TELEGRAM_CHAT_ID;
 
   if (envBotToken && envChatId) {
-    logger.debug("Telegram credentials resolved from environment variables");
     return { botToken: envBotToken, chatId: envChatId };
   }
 
-  const config = await getConfig();
+  const config = await getConfig(userId);
   if (!config) return null;
 
   const botToken = envBotToken ?? config.telegramBotToken;
@@ -174,6 +152,5 @@ export async function resolveTelegramCredentials(): Promise<TelegramCredentials 
 
   if (!botToken || !chatId) return null;
 
-  logger.debug("Telegram credentials resolved from DB config (with optional env override)");
   return { botToken, chatId };
 }

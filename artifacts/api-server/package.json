@@ -11,17 +11,21 @@
   },
   "dependencies": {
     "@polymarket/clob-client": "^4.9.0",
-    "@workspace/db": "workspace:*",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/db": "workspace:*",
     "axios": "^1.9.0",
+    "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.40.1",
     "ethers": "^5.7.2",
     "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/express": "^5.0.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.15.3",
     "tsx": "^4.19.4",
     "typescript": "^5.7.3"

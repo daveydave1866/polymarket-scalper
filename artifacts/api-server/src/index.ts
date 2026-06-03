@@ -1,14 +1,19 @@
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { pinoHttp } from "pino-http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "./lib/logger.js";
 import botRouter from "./routes/bot.js";
 import dataRouter from "./routes/data.js";
-import { db, botConfigTable } from "@workspace/db";
+import authRouter, { getJwtSecret } from "./routes/auth.js";
+import adminRouter from "./routes/admin.js";
+import { db, botConfigTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { startTradingLoop } from "./lib/engine.js";
 import { seedCredentialsFromEnv } from "./lib/credentials.js";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,30 +26,35 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-app.post("/api/auth/verify", (req, res) => {
-  const BOT_API_KEY = process.env.BOT_API_KEY;
-  if (!BOT_API_KEY) {
-    res.json({ ok: true });
-    return;
-  }
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  res.json({ ok: token === BOT_API_KEY });
-});
+app.use("/api", authRouter);
 
-app.use("/api", (req, res, next) => {
-  const BOT_API_KEY = process.env.BOT_API_KEY;
-  if (!BOT_API_KEY) { next(); return; }
-  if (req.path === "/auth/verify") { next(); return; }
+interface AuthRequest extends Request {
+  userId?: string;
+  role?: string;
+}
+
+app.use("/api", (req: AuthRequest, res: Response, next: NextFunction) => {
+  if (req.path.startsWith("/auth/")) { next(); return; }
+
   const auth = req.headers.authorization ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== BOT_API_KEY) {
+
+  if (!token) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  next();
+
+  try {
+    const payload = jwt.verify(token, getJwtSecret()) as { userId: string; username: string; role: string };
+    req.userId = payload.userId;
+    req.role = payload.role;
+    next();
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
 });
 
+app.use("/api", adminRouter);
 app.use("/api", botRouter);
 app.use("/api", dataRouter);
 
@@ -60,16 +70,30 @@ app.listen(PORT, "0.0.0.0", async () => {
   logger.info({ port: PORT }, "API server listening");
 
   try {
-    let [config] = await db
-      .select()
-      .from(botConfigTable)
-      .where(eq(botConfigTable.id, "singleton"));
+    const allUsers = await db.select().from(usersTable);
 
-    if (!config) {
-      [config] = await db
-        .insert(botConfigTable)
-        .values({
-          id: "singleton",
+    if (allUsers.length === 0) {
+      const adminUsername = (process.env.ADMIN_USERNAME ?? "admin").toLowerCase();
+      const adminPassword = process.env.ADMIN_PASSWORD ?? "changeme123";
+      const passwordHash = await bcrypt.hash(adminPassword, 12);
+      const adminId = randomUUID();
+
+      const [admin] = await db.insert(usersTable).values({
+        id: adminId,
+        username: adminUsername,
+        passwordHash,
+        role: "admin",
+      }).returning();
+
+      let botConfig = await db.select().from(botConfigTable).where(eq(botConfigTable.id, "singleton")).then(r => r[0]);
+
+      if (botConfig) {
+        await db.update(botConfigTable).set({ id: adminId, userId: adminId }).where(eq(botConfigTable.id, "singleton"));
+        logger.info({ adminId, username: adminUsername }, "Migrated singleton config to first admin user");
+      } else {
+        await db.insert(botConfigTable).values({
+          id: adminId,
+          userId: adminId,
           mode: "paper",
           minEdge: 0.05,
           maxPositionSize: 50,
@@ -78,18 +102,24 @@ app.listen(PORT, "0.0.0.0", async () => {
           enabledCategories: "sports,crypto,weather",
           running: false,
           paperBalance: 1000,
-        })
-        .returning();
-      logger.info("Bot config initialized with defaults");
-    }
+        });
+      }
 
-    await seedCredentialsFromEnv();
+      await seedCredentialsFromEnv(adminId);
+      logger.info({ username: adminUsername }, `First admin created — password: ${adminPassword}`);
 
-    if (config?.running) {
-      logger.info("Bot was running before restart — resuming trading loop");
-      startTradingLoop();
+      if (botConfig?.running) {
+        logger.info({ userId: adminId }, "Bot was running before restart — resuming trading loop");
+        startTradingLoop(adminId);
+      }
+    } else {
+      const runningConfigs = await db.select().from(botConfigTable).where(eq(botConfigTable.running, true));
+      for (const cfg of runningConfigs) {
+        logger.info({ userId: cfg.userId }, "Resuming trading loop for user");
+        startTradingLoop(cfg.userId);
+      }
     }
   } catch (err) {
-    logger.warn({ err }, "Could not initialize bot config on startup");
+    logger.warn({ err }, "Could not complete startup initialization");
   }
 });
